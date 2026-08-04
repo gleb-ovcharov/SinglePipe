@@ -1,6 +1,6 @@
 from singlepipe.model_types import TaskType
 
-from .object_detection import (
+from .image_schemas.object_detection import (
     BBox,
     Detection,
     ObjectDetectionInput,

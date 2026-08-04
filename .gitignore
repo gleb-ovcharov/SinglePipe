@@ -4,19 +4,19 @@ __pycache__/
 build/
 dist/
 wheels/
-*.egg-info
+*.egg-info/
 
 # Virtual environments
-.venv
+.venv/
 
+# Local config / secrets
 .env
 
+# Local data / test artifacts
 .data/
-
 .tests/
 
+# Tool caches
 .pytest_cache/
-
 .ruff_cache/
-
-.mypy/
+.mypy_cache/

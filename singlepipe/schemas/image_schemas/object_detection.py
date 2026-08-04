@@ -3,7 +3,7 @@ from __future__ import annotations
 import io
 from collections.abc import Iterable, Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 import httpx
 import numpy as np
@@ -177,21 +177,12 @@ class ObjectDetectionOutput(BaseModel):
         return self
 
     @classmethod
-    def from_pipeline_output(
-        cls,
-        raw: list[dict],
-        image_width: int | None = None,
-        image_height: int | None = None,
-    ) -> ObjectDetectionOutput:
-        """Build from HF ``pipeline("object-detection")`` output.
-
-        HF returns ``[{"score", "label", "box": {"xmin", "ymin", "xmax", "ymax"}}, ...]``.
-        """
+    def from_pipeline_output(cls, raw: Any, **context: Any) -> Self:
         return cls.model_validate(
             {
                 "predictions": raw,
-                "image_width": image_width,
-                "image_height": image_height,
+                "image_width": context.get("image_width"),
+                "image_height": context.get("image_height"),
             }
         )
 
@@ -283,6 +274,17 @@ class ObjectDetectionInput(BaseModel):
             return Image.open(io.BytesIO(image)).convert("RGB")
 
         raise TypeError(f"Unsupported image type: {type(image).__name__}")
+
+    @classmethod
+    def from_raw(cls, raw: Any) -> Self:
+        return cls.model_validate({"image": raw})
+
+    @property
+    def output_context(self) -> dict[str, Any]:
+        return {
+            "image_width": self.image.width,
+            "image_height": self.image.height,
+        }
 
     def to_pipeline_input(self) -> Image.Image:
         return self.image

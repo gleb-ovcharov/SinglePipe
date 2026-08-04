@@ -1,10 +1,11 @@
 [project]
 name = "singlepipe"
-version = "0.1.0"
+version = "0.0.1"
 description = "Typed interface for ML model inference across HuggingFace, PyTorch, and other backends"
 readme = "README.md"
-requires-python = ">=3.10"
-license = { text = "MIT" }
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     { name = "Gleb", email = "glebov274@gmail.com" },
 ]
@@ -12,9 +13,7 @@ keywords = ["ml", "inference", "huggingface", "pytorch", "pydantic", "typed"]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -50,21 +49,22 @@ dev = [
 ]
 
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools]
-packages = ["singlepipe"]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["singlepipe*"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 strict = false
 warn_return_any = true
 warn_unused_ignores = true

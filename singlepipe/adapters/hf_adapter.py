@@ -1,16 +1,12 @@
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import numpy as np
-from PIL import Image
-from pydantic import BaseModel
 from transformers import pipeline as hf_pipeline
 
 from singlepipe.model_types import TaskType
 from singlepipe.schemas import get_schemas
 
 if TYPE_CHECKING:
-    import torch
+    pass
 
 
 class HFAdapter:
@@ -66,6 +62,9 @@ class HFAdapter:
       errors from ``transformers.pipeline`` at construction time.
     """
 
+
+    
+
     def __init__(
         self,
         model_name: str,
@@ -85,42 +84,25 @@ class HFAdapter:
 
         self._input_schema, self._output_schema = get_schemas(task)
 
-    def __call__(
-        self,
-        raw_input: Image.Image | np.ndarray | str | Path | bytes | "torch.Tensor" | BaseModel,
-    ) -> BaseModel:
-        """Run the pipeline on one input and return a validated output object.
 
-        Parameters
-        ----------
-        raw_input:
-            Either an already-constructed instance of the task's input
-            schema, or any raw value accepted by that schema (e.g. a PIL
-            image, a numpy array, a path, a URL, a torch tensor, or bytes
-            for image-based tasks). If not already a schema instance, the
-            value is wrapped as ``{"image": raw_input}`` and validated.
+    
 
-        Returns
-        -------
-        BaseModel
-            An instance of the task's output schema, materialized from the
-            pipeline's raw output via ``from_pipeline_output`` and enriched
-            with image dimensions when available.
-        """
+
+    def __call__(self, raw_input):
+    
         if isinstance(raw_input, self._input_schema):
             validated_in = raw_input
+        elif isinstance(raw_input, dict):
+            validated_in = self._input_schema.model_validate(raw_input)
         else:
-            validated_in = self._input_schema.model_validate({"image": raw_input})
+            validated_in = self._input_schema.from_raw(raw_input)
 
-        hf_input = validated_in.to_pipeline_input()  # type: ignore[arg-type]
-        image_width, image_height = validated_in.image.size
-
-        raw_output = self.pipeline(hf_input)
+        
+        raw_output = self.pipeline(validated_in.to_pipeline_input())
 
         return self._output_schema.from_pipeline_output(
             raw_output,
-            image_width=image_width,
-            image_height=image_height,
+            **validated_in.output_context
         )
 
     def __repr__(self) -> str:
