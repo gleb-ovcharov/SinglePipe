@@ -68,3 +68,9 @@ python_version = "3.11"
 strict = false
 warn_return_any = true
 warn_unused_ignores = true
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+markers = [
+    "slow: downloads or runs large pretrained models (deselect with -m \"not slow\")",
+]

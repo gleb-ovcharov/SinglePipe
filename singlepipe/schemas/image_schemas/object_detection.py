@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-
 from collections.abc import Iterable, Iterator
-
 from typing import Any, Self
 
-
+from PIL import Image as PILImage
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -13,8 +11,6 @@ from pydantic import (
     computed_field,
     model_validator,
 )
-
-from PIL import Image as PILImage
 
 from singlepipe.schemas.modalities import Image
 
@@ -132,10 +128,10 @@ class ObjectDetectionOutput(BaseModel):
         return self
 
     @classmethod
-    def from_pipeline_output(cls, raw: Any, **context: Any) -> Self:
+    def from_pipeline_output(cls, raw_output: Any, **context: Any) -> Self:
         return cls.model_validate(
             {
-                "predictions": raw,
+                "predictions": raw_output,
                 "image_width": context.get("image_width"),
                 "image_height": context.get("image_height"),
             }

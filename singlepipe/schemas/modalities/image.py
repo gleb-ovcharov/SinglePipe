@@ -1,7 +1,7 @@
 import base64
 import io
 from pathlib import Path
-from typing import Any
+from typing import IO, Any
 
 import httpx
 import numpy as np
@@ -40,6 +40,10 @@ def _normalize_ndarray(array: np.ndarray) -> PILImage.Image:
             "If you have a CHW array, transpose it first; batches are not supported."
         )
 
+    # PIL cannot build an image from (H, W, 1); drop the channel axis -> (H, W).
+    if array.ndim == 3 and array.shape[2] == 1:
+        array = array[..., 0]
+
     if np.issubdtype(array.dtype, np.floating):
         array = np.clip(array * 255.0, 0, 255).astype(np.uint8)
     elif array.dtype != np.uint8:
@@ -48,14 +52,27 @@ def _normalize_ndarray(array: np.ndarray) -> PILImage.Image:
     return PILImage.fromarray(array).convert("RGB")
 
 
+def _open_image(source: str | Path | IO[bytes], description: str) -> PILImage.Image:
+    """Open and decode an image with PIL, converting PIL/OS errors to ValueError.
+
+    ``convert`` forces full decoding, so truncated files fail here too, not later.
+    pydantic wraps ValueError into ValidationError; OSError would leak as-is.
+    """
+    try:
+        return PILImage.open(source).convert("RGB")
+    except OSError as error:
+        raise ValueError(f"Cannot read image from {description}: {error}") from error
+
+
 def _looks_like_url(s: str) -> bool:
     return s.startswith(("http://", "https://"))
 
 
 def _load_from_url(url: str, timeout: float = 10.0) -> PILImage.Image:
+    """Download an image. Network and HTTP errors propagate as httpx exceptions."""
     response = httpx.get(url, timeout=timeout, follow_redirects=True)
     response.raise_for_status()
-    return PILImage.open(io.BytesIO(response.content)).convert("RGB")
+    return _open_image(io.BytesIO(response.content), f"URL {url}")
 
 
 class Image(BaseModel):
@@ -73,6 +90,10 @@ class Image(BaseModel):
       (``data:<mime>;base64,<payload>``)
     - ``pathlib.Path`` — local file path
     - ``bytes`` — raw image bytes
+
+    Any invalid input (unsupported type, wrong shape, unreadable file or bytes)
+    raises ``pydantic.ValidationError``. Network failures while downloading a
+    URL raise ``httpx`` exceptions.
 
     Batches (B > 1) are not supported; pass one image at a time.
     """
@@ -97,7 +118,11 @@ class Image(BaseModel):
     @field_validator("pil", mode="before")
     @classmethod
     def _convert_to_pil(cls, image: Any) -> PILImage.Image:
-        """Normalize any supported source into ``PIL.Image.Image`` in RGB mode."""
+        """Normalize any supported source into ``PIL.Image.Image`` in RGB mode.
+
+        Raises ValueError (not TypeError) on bad input: pydantic wraps only
+        ValueError and AssertionError into ValidationError.
+        """
         if isinstance(image, PILImage.Image):
             return image.convert("RGB")
 
@@ -133,18 +158,22 @@ class Image(BaseModel):
                         "Only base64-encoded data URIs are supported "
                         "(expected format: 'data:<mime>;base64,<payload>')"
                     )
-                return PILImage.open(io.BytesIO(base64.b64decode(b64))).convert("RGB")
+                return _open_image(io.BytesIO(base64.b64decode(b64)), "data URI")
             if _looks_like_url(image):
                 return _load_from_url(image)
-            return PILImage.open(image).convert("RGB")
+            return _open_image(image, f"file {image!r}")
 
         if isinstance(image, Path):
-            return PILImage.open(image).convert("RGB")
+            return _open_image(image, f"file {str(image)!r}")
 
         if isinstance(image, bytes):
-            return PILImage.open(io.BytesIO(image)).convert("RGB")
+            return _open_image(io.BytesIO(image), "bytes")
 
-        raise TypeError(f"Unsupported image type: {type(image).__name__}")
+        raise ValueError(
+            f"Unsupported image type: {type(image).__name__}. Expected PIL image, "
+            "numpy array, torch tensor, bytes, pathlib.Path, file path, URL "
+            "or base64 data URI."
+        )
 
     @computed_field
     @property

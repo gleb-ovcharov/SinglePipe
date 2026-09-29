@@ -1,64 +1,38 @@
-"""Общие фикстуры для тестов схем."""
-import numpy as np
+"""Shared fixtures for SinglePipe tests.
+
+Images are generated in memory with PIL, so tests need no asset files and no network.
+"""
+
+from __future__ import annotations
+
+import io
+from collections.abc import Callable
+
 import pytest
-from PIL import Image
+from PIL import Image as PILImage
 
-from singlepipe.schemas import BBox, Detection
-
-
-@pytest.fixture
-def bbox_a() -> BBox:
-    """Бокс 10x10 в верхнем левом углу картинки 100x100."""
-    return BBox(xmin=0, ymin=0, xmax=10, ymax=10)
+from tests.constants import HEIGHT, WIDTH
 
 
 @pytest.fixture
-def bbox_b() -> BBox:
-    """Бокс 10x10, наполовину перекрывающийся с bbox_a."""
-    return BBox(xmin=5, ymin=5, xmax=15, ymax=15)
+def pil_rgb() -> PILImage.Image:
+    """Solid red RGB image of size WIDTH x HEIGHT."""
+    return PILImage.new("RGB", (WIDTH, HEIGHT), color=(255, 0, 0))
 
 
 @pytest.fixture
-def bbox_far() -> BBox:
-    """Бокс, полностью отделённый от bbox_a и bbox_b."""
-    return BBox(xmin=50, ymin=50, xmax=60, ymax=60)
+def encode() -> Callable[[PILImage.Image, str], bytes]:
+    """Encode a PIL image into bytes of the given format (PNG by default)."""
+
+    def _encode(image: PILImage.Image, fmt: str = "PNG") -> bytes:
+        buffer = io.BytesIO()
+        image.save(buffer, format=fmt)
+        return buffer.getvalue()
+
+    return _encode
 
 
 @pytest.fixture
-def cat_detection(bbox_a: BBox) -> Detection:
-    return Detection(score=0.9, label="cat", box=bbox_a)
-
-
-@pytest.fixture
-def dog_detection(bbox_b: BBox) -> Detection:
-    return Detection(score=0.4, label="dog", box=bbox_b)
-
-
-@pytest.fixture
-def person_detection(bbox_far: BBox) -> Detection:
-    return Detection(score=0.7, label="person", box=bbox_far)
-
-
-@pytest.fixture
-def pil_image() -> Image.Image:
-    """Синтетическая RGB-картинка 64x64."""
-    array = np.zeros((64, 64, 3), dtype=np.uint8)
-    array[:, :, 0] = 255  # красный канал
-    return Image.fromarray(array)
-
-
-@pytest.fixture
-def raw_hf_output() -> list[dict]:
-    """Пример вывода transformers.pipeline('object-detection')."""
-    return [
-        {
-            "score": 0.95,
-            "label": "cat",
-            "box": {"xmin": 10, "ymin": 20, "xmax": 50, "ymax": 60},
-        },
-        {
-            "score": 0.3,
-            "label": "dog",
-            "box": {"xmin": 60, "ymin": 60, "xmax": 90, "ymax": 90},
-        },
-    ]
+def png_bytes(pil_rgb: PILImage.Image, encode: Callable[..., bytes]) -> bytes:
+    """``pil_rgb`` encoded as PNG. PNG is lossless, so pixels survive the round trip."""
+    return encode(pil_rgb)
