@@ -1,3 +1,13 @@
+"""Image modality: one canonical image type for every image task.
+
+``Image`` is a value type, not a pydantic model. It normalizes any supported
+source to an RGB ``PIL.Image.Image`` and plugs into pydantic through
+``__get_pydantic_core_schema__``, so it works as a field type in schemas
+(and therefore in FastAPI) without inheriting the ``BaseModel`` interface.
+"""
+
+from __future__ import annotations
+
 import base64
 import io
 from pathlib import Path
@@ -6,17 +16,13 @@ from typing import IO, Any
 import httpx
 import numpy as np
 from PIL import Image as PILImage
-from pydantic import (
-    BaseModel,
-    ConfigDict,
-    Field,
-    computed_field,
-    field_validator,
-    model_validator,
-)
+from pydantic import GetCoreSchemaHandler, GetJsonSchemaHandler
+from pydantic.json_schema import JsonSchemaValue
+from pydantic_core import core_schema
 
 try:
     import torch
+
     _TORCH_AVAILABLE = True
 except ImportError:
     _TORCH_AVAILABLE = False
@@ -52,6 +58,29 @@ def _normalize_ndarray(array: np.ndarray) -> PILImage.Image:
     return PILImage.fromarray(array).convert("RGB")
 
 
+def _normalize_tensor(tensor: Any) -> PILImage.Image:
+    """Normalize a CHW (or batched ``(1, C, H, W)``) torch tensor to PIL RGB."""
+    tensor = tensor.detach().cpu()
+
+    if tensor.ndim == 4:
+        if tensor.shape[0] != 1:
+            raise ValueError(
+                f"Batch tensor is not supported; got shape {tuple(tensor.shape)}. "
+                "Pass one image at a time."
+            )
+        tensor = tensor.squeeze(0)
+
+    if tensor.ndim == 3 and tensor.shape[0] in {1, 3, 4}:
+        tensor = tensor.permute(1, 2, 0)
+    elif tensor.ndim != 2:
+        raise ValueError(
+            f"Expected CHW tensor with shape (C, H, W) with C in {{1, 3, 4}}; "
+            f"got shape {tuple(tensor.shape)}."
+        )
+
+    return _normalize_ndarray(tensor.numpy())
+
+
 def _open_image(source: str | Path | IO[bytes], description: str) -> PILImage.Image:
     """Open and decode an image with PIL, converting PIL/OS errors to ValueError.
 
@@ -62,6 +91,16 @@ def _open_image(source: str | Path | IO[bytes], description: str) -> PILImage.Im
         return PILImage.open(source).convert("RGB")
     except OSError as error:
         raise ValueError(f"Cannot read image from {description}: {error}") from error
+
+
+def _load_from_data_uri(uri: str) -> PILImage.Image:
+    header, sep, payload = uri.partition(",")
+    if not sep or ";base64" not in header:
+        raise ValueError(
+            "Only base64-encoded data URIs are supported "
+            "(expected format: 'data:<mime>;base64,<payload>')"
+        )
+    return _open_image(io.BytesIO(base64.b64decode(payload)), "data URI")
 
 
 def _looks_like_url(s: str) -> bool:
@@ -75,120 +114,119 @@ def _load_from_url(url: str, timeout: float = 10.0) -> PILImage.Image:
     return _open_image(io.BytesIO(response.content), f"URL {url}")
 
 
-class Image(BaseModel):
-    """Canonical image modality.
+def _to_pil(source: object) -> PILImage.Image:
+    """Normalize any supported source into ``PIL.Image.Image`` in RGB mode."""
+    if isinstance(source, PILImage.Image):
+        return source.convert("RGB")
 
-    Normalizes any supported source to ``PIL.Image.Image`` in RGB mode.
-    Used as a building block by image-based task input schemas.
+    if _TORCH_AVAILABLE and isinstance(source, torch.Tensor):
+        return _normalize_tensor(source)
+
+    if isinstance(source, np.ndarray):
+        return _normalize_ndarray(source)
+
+    if isinstance(source, str):
+        if source.startswith("data:"):
+            return _load_from_data_uri(source)
+        if _looks_like_url(source):
+            return _load_from_url(source)
+        return _open_image(source, f"file {source!r}")
+
+    if isinstance(source, Path):
+        return _open_image(source, f"file {str(source)!r}")
+
+    if isinstance(source, bytes):
+        return _open_image(io.BytesIO(source), "bytes")
+
+    raise ValueError(
+        f"Unsupported image type: {type(source).__name__}. Expected PIL image, "
+        "numpy array, torch tensor, bytes, pathlib.Path, file path, URL "
+        "or base64 data URI."
+    )
+
+
+class Image:
+    """Canonical image modality: any supported source, normalized to RGB PIL.
 
     Accepts:
-    - ``PIL.Image.Image``
-    - ``numpy.ndarray`` (HWC; uint8 or float in [0, 1])
+    - ``PIL.Image.Image`` (any mode)
+    - ``numpy.ndarray`` (HWC or HW; uint8 or float in [0, 1])
     - ``torch.Tensor`` (CHW, or batched ``(1, C, H, W)``; uint8 or float
       in [0, 1]); optional dependency
     - ``str`` — local file path, ``http(s)://`` URL, or base64 data URI
       (``data:<mime>;base64,<payload>``)
     - ``pathlib.Path`` — local file path
     - ``bytes`` — raw image bytes
+    - ``Image`` — another instance, shared without copying
 
-    Any invalid input (unsupported type, wrong shape, unreadable file or bytes)
-    raises ``pydantic.ValidationError``. Network failures while downloading a
-    URL raise ``httpx`` exceptions.
+    Invalid input raises ``ValueError``; inside a pydantic schema it becomes
+    ``pydantic.ValidationError`` (a ``ValueError`` subclass, so ``except
+    ValueError`` catches both). Network failures while downloading a URL raise
+    ``httpx`` exceptions.
 
-    Batches (B > 1) are not supported; pass one image at a time.
+    Instances are read-only: ``pil`` has no setter. The PIL image itself is
+    mutable, so do not modify ``image.pil`` in place.
+
+    In pydantic schemas:
+    - ``model_dump()`` keeps the ``Image`` object (nothing is lost);
+    - ``model_dump_json()`` writes only ``{"width": ..., "height": ...}``;
+    - the JSON schema (FastAPI / OpenAPI) is a string: URL, path or data URI.
     """
 
-    model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
+    __slots__ = ("_pil",)
 
-    pil: PILImage.Image = Field(title="Input image")
+    def __init__(self, source: object) -> None:
+        self._pil = source.pil if isinstance(source, Image) else _to_pil(source)
 
-    @model_validator(mode="before")
-    @classmethod
-    def _accept_raw(cls, data: Any) -> Any:
-        """Accept raw values in addition to ``{"pil": ...}`` dicts.
+    @property
+    def pil(self) -> PILImage.Image:
+        """The image as ``PIL.Image.Image`` in RGB mode."""
+        return self._pil
 
-        Wraps non-dict inputs into ``{"pil": data}`` so that
-        ``Image.model_validate(<any supported source>)`` works directly,
-        making the class friendly to composition inside other schemas.
-        """
-        if isinstance(data, dict):
-            return data
-        return {"pil": data}
-
-    @field_validator("pil", mode="before")
-    @classmethod
-    def _convert_to_pil(cls, image: Any) -> PILImage.Image:
-        """Normalize any supported source into ``PIL.Image.Image`` in RGB mode.
-
-        Raises ValueError (not TypeError) on bad input: pydantic wraps only
-        ValueError and AssertionError into ValidationError.
-        """
-        if isinstance(image, PILImage.Image):
-            return image.convert("RGB")
-
-        if _TORCH_AVAILABLE and isinstance(image, torch.Tensor):
-            tensor = image.detach().cpu()
-
-            if tensor.ndim == 4:
-                if tensor.shape[0] != 1:
-                    raise ValueError(
-                        f"Batch tensor is not supported; got shape {tuple(tensor.shape)}. "
-                        "Pass one image at a time."
-                    )
-                tensor = tensor.squeeze(0)
-
-            if tensor.ndim == 3 and tensor.shape[0] in {1, 3, 4}:
-                tensor = tensor.permute(1, 2, 0)
-            elif tensor.ndim != 2:
-                raise ValueError(
-                    f"Expected CHW tensor with shape (C, H, W) with C in {{1, 3, 4}}; "
-                    f"got shape {tuple(tensor.shape)}."
-                )
-
-            return _normalize_ndarray(tensor.numpy())
-
-        if isinstance(image, np.ndarray):
-            return _normalize_ndarray(image)
-
-        if isinstance(image, str):
-            if image.startswith("data:"):
-                header, sep, b64 = image.partition(",")
-                if not sep or ";base64" not in header:
-                    raise ValueError(
-                        "Only base64-encoded data URIs are supported "
-                        "(expected format: 'data:<mime>;base64,<payload>')"
-                    )
-                return _open_image(io.BytesIO(base64.b64decode(b64)), "data URI")
-            if _looks_like_url(image):
-                return _load_from_url(image)
-            return _open_image(image, f"file {image!r}")
-
-        if isinstance(image, Path):
-            return _open_image(image, f"file {str(image)!r}")
-
-        if isinstance(image, bytes):
-            return _open_image(io.BytesIO(image), "bytes")
-
-        raise ValueError(
-            f"Unsupported image type: {type(image).__name__}. Expected PIL image, "
-            "numpy array, torch tensor, bytes, pathlib.Path, file path, URL "
-            "or base64 data URI."
-        )
-
-    @computed_field
     @property
     def width(self) -> int:
-        return self.pil.width
+        return self._pil.width
 
-    @computed_field
     @property
     def height(self) -> int:
-        return self.pil.height
+        return self._pil.height
 
-    @computed_field
     @property
     def size(self) -> tuple[int, int]:
-        return self.pil.size
+        """``(width, height)``, the PIL convention."""
+        return self._pil.size
 
     def __repr__(self) -> str:
-        return f"Image(width={self.pil.width}, height={self.pil.height})"
+        return f"Image(width={self.width}, height={self.height})"
+
+    # ------------------------------------------------------------ pydantic
+
+    @classmethod
+    def _validate(cls, value: object) -> Image:
+        return value if isinstance(value, cls) else cls(value)
+
+    def _serialize_json(self) -> dict[str, int]:
+        return {"width": self.width, "height": self.height}
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls, source: Any, handler: GetCoreSchemaHandler
+    ) -> core_schema.CoreSchema:
+        """Tell pydantic how to validate and serialize ``Image`` fields."""
+        return core_schema.no_info_plain_validator_function(
+            cls._validate,
+            serialization=core_schema.plain_serializer_function_ser_schema(
+                cls._serialize_json, when_used="json"
+            ),
+        )
+
+    @classmethod
+    def __get_pydantic_json_schema__(
+        cls, schema: core_schema.CoreSchema, handler: GetJsonSchemaHandler
+    ) -> JsonSchemaValue:
+        """Describe ``Image`` in JSON schema as the form it arrives in over JSON."""
+        return {
+            "type": "string",
+            "description": "Image as an http(s) URL, a local file path "
+            "or a base64 data URI (data:<mime>;base64,<payload>).",
+        }
