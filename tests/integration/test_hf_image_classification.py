@@ -27,10 +27,10 @@ transformers = pytest.importorskip("transformers")
 
 from singlepipe.adapters.hf_adapter import HFAdapter  # noqa: E402
 from singlepipe.schemas.image.classification import (  # noqa: E402
-    Classification,
     ImageClassificationInput,
     ImageClassificationOutput,
 )
+from singlepipe.schemas.primitives import Prediction  # noqa: E402
 from singlepipe.tasks import TaskType  # noqa: E402
 
 ASSETS = Path(__file__).parent.parent / "assets"
@@ -44,8 +44,8 @@ PRETRAINED_MODEL = "google/vit-base-patch16-224"
 def assert_valid_output(output: object, expected_len: int) -> None:
     """Contract every image-classification result must satisfy, whatever the model."""
     assert isinstance(output, ImageClassificationOutput)
-    assert len(output) == expected_len
-    assert all(isinstance(p, Classification) for p in output.predictions)
+    assert len(output.predictions) == expected_len
+    assert all(isinstance(p, Prediction) for p in output.predictions)
 
     scores = [p.score for p in output.predictions]
     assert all(s is not None and 0.0 <= s <= 1.0 for s in scores)
@@ -95,7 +95,7 @@ class TestTinyModel:
         output = tiny_adapter(PILImage.new("RGB", (64, 48)))
 
         assert isinstance(output, ImageClassificationOutput)
-        assert set(output.labels) == set(TINY_LABELS.values())
+        assert set(output.predictions.labels) == set(TINY_LABELS.values())
 
     def test_scores_are_softmax_probabilities(self, tiny_adapter: HFAdapter) -> None:
         """All classes returned, so the probabilities must sum to one."""
@@ -180,9 +180,9 @@ class TestPretrainedViT:
         output = pretrained_adapter(cats_image)
 
         assert isinstance(output, ImageClassificationOutput)
-        best = output.top1
+        best = output.predictions.top1
         assert best is not None
-        assert "cat" in best.label.lower(), f"top-5: {output.labels}"
+        assert "cat" in best.label.lower(), f"top-5: {output.predictions.labels}"
         assert best.score is not None and best.score > 0.3
 
     def test_filters_work_on_real_output(
@@ -191,8 +191,8 @@ class TestPretrainedViT:
         output = pretrained_adapter(cats_image)
 
         assert isinstance(output, ImageClassificationOutput)
-        cats = output.filter_by_label(
-            [label for label in output.labels if "cat" in label]
+        cats = output.predictions.filter_by_label(
+            [label for label in output.predictions.labels if "cat" in label]
         )
         assert len(cats) >= 1
-        assert len(output.filter_by_score(0.0)) == len(output)
+        assert len(output.predictions.filter_by_score(0.0)) == len(output.predictions)

@@ -1,7 +1,6 @@
 from singlepipe.tasks import TaskType
 
 from .image.classification import (
-    Classification,
     ImageClassificationInput,
     ImageClassificationOutput,
 )
@@ -32,7 +31,6 @@ __all__ = [
     "ObjectDetectionInput",
     "ObjectDetectionOutput",
     # image classification
-    "Classification",
     "ImageClassificationInput",
     "ImageClassificationOutput",
     # registry
