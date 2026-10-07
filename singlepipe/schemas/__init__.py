@@ -1,11 +1,11 @@
-from singlepipe.model_types import TaskType
+from singlepipe.tasks import TaskType
 
-from .image_schemas.image_classification import (
+from .image.classification import (
     Classification,
     ImageClassificationInput,
     ImageClassificationOutput,
 )
-from .image_schemas.object_detection import (
+from .image.detection import (
     BBox,
     Detection,
     ObjectDetectionInput,

@@ -1,7 +1,7 @@
 """SinglePipe: typed multi-model inference orchestrator."""
 
 from singlepipe.adapters.hf_adapter import HFAdapter
-from singlepipe.model_types import TaskType
+from singlepipe.tasks import TaskType
 
 __version__ = "0.0.1"
 

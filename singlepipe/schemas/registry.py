@@ -13,7 +13,7 @@ from typing import NamedTuple
 
 from pydantic import BaseModel
 
-from singlepipe.model_types import TaskType
+from singlepipe.tasks import TaskType
 
 
 class InputOutputSchema(NamedTuple):

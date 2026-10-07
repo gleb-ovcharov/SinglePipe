@@ -13,14 +13,14 @@ import pytest
 from PIL import Image as PILImage
 from pydantic import ValidationError
 
-from singlepipe.model_types import TaskType
 from singlepipe.schemas import get_schemas
-from singlepipe.schemas.image_schemas.image_classification import (
+from singlepipe.schemas.image.classification import (
     Classification,
     ImageClassificationInput,
     ImageClassificationOutput,
 )
 from singlepipe.schemas.modalities import Image
+from singlepipe.tasks import TaskType
 from tests.constants import HEIGHT, WIDTH
 
 # Shaped like HF output, but deliberately NOT sorted by score.

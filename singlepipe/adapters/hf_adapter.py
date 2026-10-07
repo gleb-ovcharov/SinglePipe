@@ -2,8 +2,8 @@ from typing import TYPE_CHECKING, Any
 
 from transformers import pipeline as hf_pipeline
 
-from singlepipe.model_types import TaskType
 from singlepipe.schemas import get_schemas
+from singlepipe.tasks import TaskType
 
 if TYPE_CHECKING:
     pass

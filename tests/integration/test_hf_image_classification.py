@@ -26,12 +26,12 @@ pytest.importorskip("torch")
 transformers = pytest.importorskip("transformers")
 
 from singlepipe.adapters.hf_adapter import HFAdapter  # noqa: E402
-from singlepipe.model_types import TaskType  # noqa: E402
-from singlepipe.schemas.image_schemas.image_classification import (  # noqa: E402
+from singlepipe.schemas.image.classification import (  # noqa: E402
     Classification,
     ImageClassificationInput,
     ImageClassificationOutput,
 )
+from singlepipe.tasks import TaskType  # noqa: E402
 
 ASSETS = Path(__file__).parent.parent / "assets"
 CATS_IMAGE = ASSETS / "cats.jpg"
