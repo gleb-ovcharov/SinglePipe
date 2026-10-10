@@ -76,9 +76,7 @@ def tiny_model_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
     )
     path = tmp_path_factory.mktemp("tiny-vit")
     transformers.ViTForImageClassification(config).save_pretrained(path)
-    transformers.ViTImageProcessor(size={"height": 32, "width": 32}).save_pretrained(
-        path
-    )
+    transformers.ViTImageProcessor(size={"height": 32, "width": 32}).save_pretrained(path)
     return path
 
 
@@ -126,9 +124,7 @@ class TestTinyModel:
             pytest.param(lambda path: str(path), id="str"),
             pytest.param(lambda path: path.read_bytes(), id="bytes"),
             pytest.param(lambda path: np.asarray(PILImage.open(path)), id="ndarray"),
-            pytest.param(
-                lambda path: ImageClassificationInput.from_raw(path), id="schema"
-            ),
+            pytest.param(lambda path: ImageClassificationInput.from_raw(path), id="schema"),
             pytest.param(lambda path: {"image": path}, id="dict"),
         ],
     )
@@ -141,9 +137,7 @@ class TestTinyModel:
         path = tmp_path / "image.png"
         PILImage.new("RGB", (64, 48), color=(10, 200, 30)).save(path)
 
-        assert_valid_output(
-            tiny_adapter(make_input(path)), expected_len=len(TINY_LABELS)
-        )
+        assert_valid_output(tiny_adapter(make_input(path)), expected_len=len(TINY_LABELS))
 
     def test_top_k_is_forwarded_to_pipeline(self, tiny_model_dir: Path) -> None:
         adapter = HFAdapter(str(tiny_model_dir), TaskType.IMAGE_CLASSIFICATION, top_k=1)
@@ -171,14 +165,10 @@ def pretrained_adapter() -> HFAdapter:
 
 @pytest.mark.slow
 class TestPretrainedViT:
-    def test_output_contract(
-        self, pretrained_adapter: HFAdapter, cats_image: Path
-    ) -> None:
+    def test_output_contract(self, pretrained_adapter: HFAdapter, cats_image: Path) -> None:
         assert_valid_output(pretrained_adapter(cats_image), expected_len=5)
 
-    def test_recognises_a_cat(
-        self, pretrained_adapter: HFAdapter, cats_image: Path
-    ) -> None:
+    def test_recognises_a_cat(self, pretrained_adapter: HFAdapter, cats_image: Path) -> None:
         """ImageNet has several cat classes (tabby, tiger cat, Egyptian cat, ...)."""
         output = pretrained_adapter(cats_image)
 

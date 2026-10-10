@@ -103,7 +103,6 @@ class Detection(BaseModel):
     box: BBox = Field(title="Bounding box")
 
 
-
 class ObjectDetectionOutput(BaseModel):
     """Object detection result for a single image."""
 
@@ -117,10 +116,7 @@ class ObjectDetectionOutput(BaseModel):
             return self
         for i, det in enumerate(self.predictions):
             box = det.box
-            if (
-                box.xmax > self.image_width
-                or box.ymax > self.image_height
-            ):
+            if box.xmax > self.image_width or box.ymax > self.image_height:
                 raise ValueError(
                     f"Detection {i} box {box.as_tuple()} exceeds image size "
                     f"({self.image_width}x{self.image_height})"
@@ -161,22 +157,21 @@ class ObjectDetectionOutput(BaseModel):
         return iter(self.predictions)
 
 
-
 class ObjectDetectionInput(BaseModel):
-       """Input for object detection. See Image for accepted raw formats."""
-       
-       image: Image
-       
-       @classmethod
-       def from_raw(cls, raw: Any) -> Self:
-           return cls.model_validate({"image": raw})
-       
-       @property
-       def output_context(self) -> dict[str, Any]:
-           return {
-               "image_width": self.image.width,
-               "image_height": self.image.height,
-           }
-       
-       def to_pipeline_input(self) -> PILImage.Image:
-           return self.image.pil
+    """Input for object detection. See Image for accepted raw formats."""
+
+    image: Image
+
+    @classmethod
+    def from_raw(cls, raw: Any) -> Self:
+        return cls.model_validate({"image": raw})
+
+    @property
+    def output_context(self) -> dict[str, Any]:
+        return {
+            "image_width": self.image.width,
+            "image_height": self.image.height,
+        }
+
+    def to_pipeline_input(self) -> PILImage.Image:
+        return self.image.pil

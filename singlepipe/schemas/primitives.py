@@ -36,13 +36,9 @@ class BBox(BaseModel):
     @model_validator(mode="after")
     def _check_geometry(self) -> Self:
         if self.xmin >= self.xmax:
-            raise ValueError(
-                f"xmax ({self.xmax}) must be greater than xmin ({self.xmin})"
-            )
+            raise ValueError(f"xmax ({self.xmax}) must be greater than xmin ({self.xmin})")
         if self.ymin >= self.ymax:
-            raise ValueError(
-                f"ymax ({self.ymax}) must be greater than ymin ({self.ymin})"
-            )
+            raise ValueError(f"ymax ({self.ymax}) must be greater than ymin ({self.ymin})")
         return self
 
     @computed_field  # type: ignore[prop-decorator]
@@ -79,9 +75,7 @@ class BBox(BaseModel):
         Raises ValueError if the image size is not positive.
         """
         if image_width <= 0 or image_height <= 0:
-            raise ValueError(
-                f"Image size must be positive, got {image_width}x{image_height}"
-            )
+            raise ValueError(f"Image size must be positive, got {image_width}x{image_height}")
 
         xmin = min(self.xmin, image_width)
         ymin = min(self.ymin, image_height)

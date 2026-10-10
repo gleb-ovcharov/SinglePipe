@@ -187,17 +187,13 @@ def test_malformed_data_uri_is_rejected(uri: str) -> None:
 
 
 @pytest.mark.parametrize("scheme", ["http", "https"])
-def test_url_is_downloaded(
-    monkeypatch: pytest.MonkeyPatch, png_bytes: bytes, scheme: str
-) -> None:
+def test_url_is_downloaded(monkeypatch: pytest.MonkeyPatch, png_bytes: bytes, scheme: str) -> None:
     url = f"{scheme}://example.com/cat.png"
     calls: list[str] = []
 
     def fake_get(requested: str, **kwargs: Any) -> httpx.Response:
         calls.append(requested)
-        return httpx.Response(
-            200, content=png_bytes, request=httpx.Request("GET", requested)
-        )
+        return httpx.Response(200, content=png_bytes, request=httpx.Request("GET", requested))
 
     monkeypatch.setattr(httpx, "get", fake_get)
 

@@ -9,6 +9,7 @@ Built-in schemas are registered from ``singlepipe/schemas/__init__.py``
 after both the registry and the concrete schemas are loaded, which
 avoids circular imports.
 """
+
 from typing import NamedTuple
 
 from pydantic import BaseModel
@@ -91,7 +92,6 @@ def get_schemas(task: TaskType) -> InputOutputSchema:
     """
     if task not in _REGISTRY:
         raise KeyError(
-            f"No schemas registered for task: {task}. "
-            f"Available: {sorted(_REGISTRY.keys())}"
+            f"No schemas registered for task: {task}. Available: {sorted(_REGISTRY.keys())}"
         )
     return _REGISTRY[task]

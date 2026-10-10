@@ -99,9 +99,7 @@ class TestBBoxClip:
         assert box(*coords).clip(100, 100) is None
 
     @pytest.mark.parametrize("size", [(0, 100), (100, 0), (-5, 100)])
-    def test_non_positive_image_size_is_rejected(
-        self, size: tuple[float, float]
-    ) -> None:
+    def test_non_positive_image_size_is_rejected(self, size: tuple[float, float]) -> None:
         with pytest.raises(ValueError, match="Image size must be positive"):
             box(0, 0, 10, 10).clip(*size)
 
@@ -205,9 +203,7 @@ class TestDetection:
 
     def test_parses_flat_hf_item_with_nested_box(self) -> None:
         """HF object-detection returns {"score", "label", "box": {...}}."""
-        detection = Detection.model_validate(
-            {"score": 0.97, "label": "cat", "box": BOX}
-        )
+        detection = Detection.model_validate({"score": 0.97, "label": "cat", "box": BOX})
 
         assert detection == Detection(label="cat", score=0.97, box=BBox(**BOX))
 

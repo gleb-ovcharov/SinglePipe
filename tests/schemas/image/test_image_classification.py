@@ -79,18 +79,14 @@ class TestInput:
 
     def test_from_raw_rejects_bad_input(self) -> None:
         with pytest.raises(ValidationError):
-            ImageClassificationInput.from_raw(
-                np.zeros((3, HEIGHT, WIDTH), dtype=np.uint8)
-            )
+            ImageClassificationInput.from_raw(np.zeros((3, HEIGHT, WIDTH), dtype=np.uint8))
 
 
 # --------------------------------------------------------------------- Output
 
 
 class TestFromPipelineOutput:
-    def test_parses_hf_output_preserving_order(
-        self, output: ImageClassificationOutput
-    ) -> None:
+    def test_parses_hf_output_preserving_order(self, output: ImageClassificationOutput) -> None:
         assert isinstance(output.predictions, PredictionList)
         assert all(isinstance(p, Prediction) for p in output.predictions)
         assert output.predictions.labels == ["dog", "tabby cat", "fox", "tiger cat"]
@@ -104,17 +100,13 @@ class TestFromPipelineOutput:
 
     def test_accepts_context_kwargs(self) -> None:
         """The adapter always forwards output_context; extra keys must not break it."""
-        parsed = ImageClassificationOutput.from_pipeline_output(
-            HF_OUTPUT, unused="context"
-        )
+        parsed = ImageClassificationOutput.from_pipeline_output(HF_OUTPUT, unused="context")
 
         assert len(parsed.predictions) == len(HF_OUTPUT)
 
     def test_invalid_score_is_rejected(self) -> None:
         with pytest.raises(ValidationError):
-            ImageClassificationOutput.from_pipeline_output(
-                [{"label": "cat", "score": 1.5}]
-            )
+            ImageClassificationOutput.from_pipeline_output([{"label": "cat", "score": 1.5}])
 
     def test_missing_label_is_rejected(self) -> None:
         with pytest.raises(ValidationError):
@@ -122,9 +114,7 @@ class TestFromPipelineOutput:
 
     def test_json_round_trip(self, output: ImageClassificationOutput) -> None:
         """What FastAPI does: dump to JSON and validate it back."""
-        restored = ImageClassificationOutput.model_validate_json(
-            output.model_dump_json()
-        )
+        restored = ImageClassificationOutput.model_validate_json(output.model_dump_json())
 
         assert restored == output
 
@@ -155,9 +145,7 @@ class TestPredictionsOnHfOutput:
     def test_filter_by_label(self, output: ImageClassificationOutput) -> None:
         assert output.predictions.filter_by_label("fox").labels == ["fox"]
 
-    def test_operations_do_not_change_output(
-        self, output: ImageClassificationOutput
-    ) -> None:
+    def test_operations_do_not_change_output(self, output: ImageClassificationOutput) -> None:
         output.predictions.top(1)
 
         assert output.predictions.labels == ["dog", "tabby cat", "fox", "tiger cat"]

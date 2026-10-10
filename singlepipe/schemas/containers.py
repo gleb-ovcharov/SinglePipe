@@ -53,8 +53,7 @@ class PredictionList(Sequence[PredictionT_co]):
         for item in self._items:
             if not isinstance(item, Prediction):
                 raise TypeError(
-                    f"PredictionList items must be Prediction instances, "
-                    f"got {type(item).__name__}"
+                    f"PredictionList items must be Prediction instances, got {type(item).__name__}"
                 )
 
     # --------------------------------------------------------- sequence
@@ -205,7 +204,5 @@ def _item_type(source: Any) -> type[Prediction]:
     if isinstance(item, TypeVar):
         item = item.__bound__ or Prediction
     if not (isinstance(item, type) and issubclass(item, Prediction)):
-        raise TypeError(
-            f"PredictionList items must be a Prediction subclass, got {item!r}"
-        )
+        raise TypeError(f"PredictionList items must be a Prediction subclass, got {item!r}")
     return item

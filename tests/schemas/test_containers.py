@@ -67,9 +67,7 @@ class TestSequence:
         assert preds[-1].label == "tiger cat"
         assert [p.label for p in preds] == preds.labels
 
-    def test_contains_reversed_index_count(
-        self, preds: PredictionList[Prediction]
-    ) -> None:
+    def test_contains_reversed_index_count(self, preds: PredictionList[Prediction]) -> None:
         first = preds[0]
 
         assert first in preds
@@ -77,9 +75,7 @@ class TestSequence:
         assert preds.index(first) == 0
         assert preds.count(first) == 1
 
-    def test_slice_returns_same_container(
-        self, preds: PredictionList[Prediction]
-    ) -> None:
+    def test_slice_returns_same_container(self, preds: PredictionList[Prediction]) -> None:
         sliced = preds[1:3]
 
         assert type(sliced) is PredictionList
@@ -146,9 +142,7 @@ class TestReading:
     def test_top1_empty_is_none(self) -> None:
         assert PredictionList().top1 is None
 
-    def test_top1_without_scores_raises(
-        self, unscored: PredictionList[Prediction]
-    ) -> None:
+    def test_top1_without_scores_raises(self, unscored: PredictionList[Prediction]) -> None:
         with pytest.raises(ValueError, match="requires confidence scores"):
             _ = unscored.top1
 
@@ -157,9 +151,7 @@ class TestReading:
 
 
 class TestTop:
-    def test_sorted_by_score_descending(
-        self, preds: PredictionList[Prediction]
-    ) -> None:
+    def test_sorted_by_score_descending(self, preds: PredictionList[Prediction]) -> None:
         assert preds.top(3).labels == ["tabby cat", "tiger cat", "dog"]
 
     def test_default_k_is_one(self, preds: PredictionList[Prediction]) -> None:
@@ -169,16 +161,12 @@ class TestTop:
         assert len(preds.top(100)) == 4
 
     @pytest.mark.parametrize("k", [0, -1])
-    def test_non_positive_k_rejected(
-        self, preds: PredictionList[Prediction], k: int
-    ) -> None:
+    def test_non_positive_k_rejected(self, preds: PredictionList[Prediction], k: int) -> None:
         with pytest.raises(ValueError, match="k must be positive"):
             preds.top(k)
 
     def test_ties_keep_original_order(self) -> None:
-        tied = PredictionList(
-            [pred("first", 0.4), pred("best", 0.9), pred("second", 0.4)]
-        )
+        tied = PredictionList([pred("first", 0.4), pred("best", 0.9), pred("second", 0.4)])
 
         assert tied.top(3).labels == ["best", "first", "second"]
 
@@ -205,15 +193,11 @@ class TestFilters:
             "tiger cat",
         ]
 
-    def test_filter_by_score_inclusive_and_ordered(
-        self, preds: PredictionList[Prediction]
-    ) -> None:
+    def test_filter_by_score_inclusive_and_ordered(self, preds: PredictionList[Prediction]) -> None:
         assert preds.filter_by_score(0.5).labels == ["tabby cat", "tiger cat"]
         assert preds.filter_by_score(0.1).labels == ["dog", "tabby cat", "tiger cat"]
 
-    def test_filter_by_score_can_be_empty(
-        self, preds: PredictionList[Prediction]
-    ) -> None:
+    def test_filter_by_score_can_be_empty(self, preds: PredictionList[Prediction]) -> None:
         assert len(preds.filter_by_score(0.99)) == 0
 
     def test_filter_by_score_without_scores_raises(
@@ -308,9 +292,7 @@ HF_DETECTIONS: list[dict[str, Any]] = [
 
 class TestAsPydanticField:
     def test_validates_list_of_dicts(self) -> None:
-        output = Output.model_validate(
-            {"predictions": [{"label": "cat", "score": 0.9}]}
-        )
+        output = Output.model_validate({"predictions": [{"label": "cat", "score": 0.9}]})
 
         assert isinstance(output.predictions, PredictionList)
         assert output.predictions == PredictionList([pred("cat", 0.9)])
@@ -342,18 +324,14 @@ class TestAsPydanticField:
             Output.model_validate({"predictions": [{"label": "cat", "score": 1.5}]})
 
     def test_model_dump_is_list_of_dicts(self) -> None:
-        output = Output.model_validate(
-            {"predictions": [{"label": "cat", "score": 0.9}]}
-        )
+        output = Output.model_validate({"predictions": [{"label": "cat", "score": 0.9}]})
 
         assert output.model_dump() == {
             "predictions": [{"label": "cat", "score": 0.9, "label_id": None}]
         }
 
     def test_model_dump_json(self) -> None:
-        output = Output.model_validate(
-            {"predictions": [{"label": "cat", "score": 0.9}]}
-        )
+        output = Output.model_validate({"predictions": [{"label": "cat", "score": 0.9}]})
 
         assert output.model_dump_json() == (
             '{"predictions":[{"label":"cat","score":0.9,"label_id":null}]}'

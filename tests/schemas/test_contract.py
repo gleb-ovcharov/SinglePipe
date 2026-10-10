@@ -136,9 +136,7 @@ class TestOutputSchema:
         validated = SizedTextInput.from_raw("hello")
         raw_backend_output = validated.to_pipeline_input().upper()
 
-        output = LabelOutput.from_pipeline_output(
-            raw_backend_output, **validated.output_context
-        )
+        output = LabelOutput.from_pipeline_output(raw_backend_output, **validated.output_context)
 
         assert output == LabelOutput(label="HELLO", length=5)
 
@@ -155,9 +153,7 @@ class TestEnsureImplements:
             pytest.param(LabelOutput, OutputSchema, id="output"),
         ],
     )
-    def test_accepts_complete_implementation(
-        self, schema: type, contract: type
-    ) -> None:
+    def test_accepts_complete_implementation(self, schema: type, contract: type) -> None:
         ensure_implements(schema, contract)
 
     def test_rejects_forgotten_abstract_classmethod(self) -> None:

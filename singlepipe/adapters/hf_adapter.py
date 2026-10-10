@@ -62,9 +62,6 @@ class HFAdapter:
       errors from ``transformers.pipeline`` at construction time.
     """
 
-
-    
-
     def __init__(
         self,
         model_name: str,
@@ -84,12 +81,8 @@ class HFAdapter:
 
         self._input_schema, self._output_schema = get_schemas(task)
 
-
-    
-
-
     def __call__(self, raw_input):
-    
+
         if isinstance(raw_input, self._input_schema):
             validated_in = raw_input
         elif isinstance(raw_input, dict):
@@ -97,13 +90,9 @@ class HFAdapter:
         else:
             validated_in = self._input_schema.from_raw(raw_input)
 
-        
         raw_output = self.pipeline(validated_in.to_pipeline_input())
 
-        return self._output_schema.from_pipeline_output(
-            raw_output,
-            **validated_in.output_context
-        )
+        return self._output_schema.from_pipeline_output(raw_output, **validated_in.output_context)
 
     def __repr__(self) -> str:
         return f"HFAdapter(model={self.model_name!r}, task={self.task.value!r})"

@@ -90,9 +90,7 @@ class OutputSchema(BaseModel, ABC):
         """
 
 
-def ensure_implements(
-    schema: object, contract: type[InputSchema[Any] | OutputSchema]
-) -> None:
+def ensure_implements(schema: object, contract: type[InputSchema[Any] | OutputSchema]) -> None:
     """Check that ``schema`` is a complete implementation of ``contract``.
 
     Raises ``TypeError`` with an explanation if ``schema`` is not a class,
@@ -111,12 +109,8 @@ def ensure_implements(
         )
 
     if not issubclass(schema, contract):
-        raise TypeError(
-            f"{schema.__name__} must subclass singlepipe.schemas.{contract_name}."
-        )
+        raise TypeError(f"{schema.__name__} must subclass singlepipe.schemas.{contract_name}.")
 
     if inspect.isabstract(schema):
         missing = ", ".join(sorted(schema.__abstractmethods__))
-        raise TypeError(
-            f"{schema.__name__} does not implement {contract_name}: missing {missing}."
-        )
+        raise TypeError(f"{schema.__name__} does not implement {contract_name}: missing {missing}.")
