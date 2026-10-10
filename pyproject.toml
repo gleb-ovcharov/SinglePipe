@@ -3,7 +3,7 @@ name = "singlepipe"
 version = "0.0.1"
 description = "Typed interface for ML model inference across HuggingFace, PyTorch, and other backends"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [
@@ -58,16 +58,22 @@ include = ["singlepipe*"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
+# PEP 695 generics (class X[T]) — отдельное решение: вариантность и поддержка pydantic
+ignore = ["UP046", "UP047"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 strict = false
 warn_return_any = true
 warn_unused_ignores = true
+
+[[tool.mypy.overrides]]
+module = ["torch", "torch.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
