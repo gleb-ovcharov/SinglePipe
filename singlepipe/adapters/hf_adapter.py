@@ -75,10 +75,10 @@ class HFAdapter:
         self.model_name = model_name
         self.task = task
 
-        self.pipeline = hf_pipeline(
-            task=task.value,  # type: ignore[arg-type]
+        self.pipeline = hf_pipeline(  # type: ignore[call-overload]  # task is a runtime str
+            task=task.value,
             model=model_name,
-            device=device,  # type: ignore[arg-type]
+            device=device,
             **pipeline_kwargs,
         )
 

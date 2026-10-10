@@ -47,8 +47,11 @@ def assert_valid_output(output: object, expected_len: int) -> None:
     assert len(output.predictions) == expected_len
     assert all(isinstance(p, Prediction) for p in output.predictions)
 
-    scores = [p.score for p in output.predictions]
-    assert all(s is not None and 0.0 <= s <= 1.0 for s in scores)
+    scores: list[float] = []
+    for p in output.predictions:
+        assert p.score is not None
+        scores.append(p.score)
+    assert all(0.0 <= s <= 1.0 for s in scores)
     # HF returns predictions sorted by score; we must not reorder them.
     assert scores == sorted(scores, reverse=True)
 

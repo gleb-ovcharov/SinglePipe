@@ -48,7 +48,7 @@ def output() -> ImageClassificationOutput:
 def unscored() -> ImageClassificationOutput:
     """Output from a backend that gives no confidence values."""
     return ImageClassificationOutput(
-        predictions=[Prediction(label="cat"), Prediction(label="dog")],
+        predictions=PredictionList([Prediction(label="cat"), Prediction(label="dog")]),
     )
 
 

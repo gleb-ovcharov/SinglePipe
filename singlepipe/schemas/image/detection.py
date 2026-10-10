@@ -38,22 +38,22 @@ class BBox(BaseModel):
             raise ValueError("ymax must be greater than ymin")
         return self
 
-    @computed_field  # type: ignore[misc]
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def width(self) -> float:
         return self.xmax - self.xmin
 
-    @computed_field  # type: ignore[misc]
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def height(self) -> float:
         return self.ymax - self.ymin
 
-    @computed_field  # type: ignore[misc]
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def area(self) -> float:
         return self.width * self.height
 
-    @computed_field  # type: ignore[misc]
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def center(self) -> tuple[float, float]:
         return (
@@ -157,7 +157,7 @@ class ObjectDetectionOutput(BaseModel):
     def __len__(self) -> int:
         return len(self.predictions)
 
-    def __iter__(self) -> Iterator[Detection]:
+    def __iter__(self) -> Iterator[Detection]:  # type: ignore[override]  # TODO: step 3
         return iter(self.predictions)
 
 
