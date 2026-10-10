@@ -1,4 +1,23 @@
+"""Tasks: what a model does, as names and as typed objects.
+
+``TaskType`` is the vocabulary of task names. Its values match HuggingFace
+``transformers.pipeline`` task strings wherever an HF pipeline exists.
+
+``Task`` binds a name to the input and output schemas of a task, with their types:
+an adapter that takes a ``Task`` can type its output as the task's output schema.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
 from enum import StrEnum
+from typing import Any, Generic, TypeVar
+
+from singlepipe.schemas.contract import InputSchema, OutputSchema
+from singlepipe.schemas.image.classification import (
+    ImageClassificationInput,
+    ImageClassificationOutput,
+)
 
 
 class TaskType(StrEnum):
@@ -77,3 +96,35 @@ class TaskType(StrEnum):
 
     # OCR
     OCR = "ocr"
+
+
+# --------------------------------------------------------------------- Task
+
+InT = TypeVar("InT", bound=InputSchema[Any])
+OutT = TypeVar("OutT", bound=OutputSchema)
+
+
+@dataclass(frozen=True)
+class Task(Generic[InT, OutT]):
+    """A task: its name and the schemas of its input and output.
+
+    The type parameters are inferred from the constructor, nobody writes them::
+
+        is_cat = Task(TaskType.IMAGE_CLASSIFICATION, ImageTaskInput, IsCat)
+        # Task[ImageTaskInput, IsCat]
+
+    ``name`` is the task's name and, for ``HFAdapter``, the HF pipeline to run.
+    A custom task can reuse a built-in HF pipeline with its own schemas, or use
+    any name for backends without HF pipelines.
+    """
+
+    name: str
+    input_schema: type[InT]
+    output_schema: type[OutT]
+
+
+# ----------------------------------------------------------- built-in tasks
+
+image_classification = Task(
+    TaskType.IMAGE_CLASSIFICATION, ImageClassificationInput, ImageClassificationOutput
+)
