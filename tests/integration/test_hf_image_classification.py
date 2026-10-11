@@ -185,6 +185,40 @@ class TestTinyModel:
         for output in outputs:
             assert_valid_output(output, expected_len=len(TINY_LABELS))
 
+    async def test_batched_calls_match_single_calls(self, tiny_model_dir: Path) -> None:
+        """Real HF batching: one pipeline call for 4 images, same answers as 4 calls.
+
+        Also checks what HF returns for a list input: one output per image, in
+        order, each shaped like a single-image output.
+        """
+        images = [
+            PILImage.new("RGB", (64, 48), color=(i * 60, 255 - i * 60, i * 30)) for i in range(4)
+        ]
+        single = HFAdapter(str(tiny_model_dir), image_classification)
+        batched = HFAdapter(
+            str(tiny_model_dir), image_classification, max_batch_size=4, max_wait_ms=1000
+        )
+        pipeline_calls: list[int] = []
+        real_pipeline = batched.pipeline
+
+        def counting_pipeline(inputs: object, **kwargs: object) -> object:
+            pipeline_calls.append(len(inputs) if isinstance(inputs, list) else 1)
+            return real_pipeline(inputs, **kwargs)
+
+        batched.pipeline = counting_pipeline
+        try:
+            expected = [await single(img) for img in images]
+            actual = await asyncio.gather(*(batched(img) for img in images))
+        finally:
+            single.close()
+            batched.close()
+
+        assert pipeline_calls == [4]
+        for one, together in zip(expected, actual, strict=True):
+            assert together.predictions.labels == one.predictions.labels
+            for a, b in zip(together.predictions, one.predictions, strict=True):
+                assert a.score == pytest.approx(b.score, abs=1e-5)
+
 
 # ------------------------------------------------------------ pretrained model
 

@@ -57,6 +57,8 @@ class HFAdapter(Adapter[InT, OutT]):
     device:
         Device to place the model on: ``None`` (HF default), a CUDA device
         index, or a string such as ``"cpu"`` or ``"cuda:0"``.
+    max_batch_size, max_wait_ms:
+        Dynamic batching, see ``Adapter``. Defaults: no batching.
     **pipeline_kwargs:
         Extra keyword arguments passed straight to ``transformers.pipeline``
         (e.g. ``top_k``, ``revision``, ``trust_remote_code``).
@@ -82,6 +84,12 @@ class HFAdapter(Adapter[InT, OutT]):
     In a script, run it with ``asyncio.run(...)``; in Jupyter, ``await`` works
     directly in a cell.
 
+    Batching concurrent calls, e.g. the crops of one image::
+
+        classifier = HFAdapter("my-org/sku-vit", image_classification,
+                               max_batch_size=16, max_wait_ms=5)
+        results = await asyncio.gather(*(classifier(crop) for crop in crops))
+
     A custom task on top of an HF pipeline::
 
         is_cat = Task("is-cat", ImageTaskInput, IsCat)
@@ -97,6 +105,8 @@ class HFAdapter(Adapter[InT, OutT]):
         *,
         hf_task: str | None = None,
         device: int | str | None = None,
+        max_batch_size: int = 1,
+        max_wait_ms: float = 0,
         **pipeline_kwargs: Any,
     ) -> None: ...
 
@@ -108,6 +118,8 @@ class HFAdapter(Adapter[InT, OutT]):
         *,
         hf_task: str | None = None,
         device: int | str | None = None,
+        max_batch_size: int = 1,
+        max_wait_ms: float = 0,
         **pipeline_kwargs: Any,
     ) -> None: ...
 
@@ -118,6 +130,8 @@ class HFAdapter(Adapter[InT, OutT]):
         *,
         hf_task: str | None = None,
         device: int | str | None = None,
+        max_batch_size: int = 1,
+        max_wait_ms: float = 0,
         **pipeline_kwargs: Any,
     ) -> None:
         resolved = get_task(task) if isinstance(task, str) else task
@@ -126,7 +140,6 @@ class HFAdapter(Adapter[InT, OutT]):
         if not is_torch_available():
             raise ImportError(f"HFAdapter needs torch to load models: {_INSTALL_HINT}")
 
-        super().__init__(resolved)
         self.model = model
         self.hf_task = pipeline_name
         self.pipeline: Any = hf_pipeline(  # type: ignore[call-overload]  # runtime str
@@ -135,6 +148,8 @@ class HFAdapter(Adapter[InT, OutT]):
             device=device,
             **pipeline_kwargs,
         )
+        # After loading: this starts the worker thread.
+        super().__init__(resolved, max_batch_size=max_batch_size, max_wait_ms=max_wait_ms)
 
     def run_batch(self, inputs: Sequence[Any]) -> Sequence[Any]:
         """One input: a plain pipeline call. Several: HF batches the list itself."""
