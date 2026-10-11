@@ -1,4 +1,4 @@
-"""Unit tests for the TaskType.IMAGE_CLASSIFICATION schemas.
+"""Unit tests for the image classification schemas.
 
 No model is loaded: the output is built from what HF ``image-classification``
 pipelines return, a list of ``{"label": str, "score": float}`` dicts.
@@ -17,7 +17,6 @@ import pytest
 from PIL import Image as PILImage
 from pydantic import ValidationError
 
-from singlepipe.schemas import get_schemas
 from singlepipe.schemas.containers import PredictionList
 from singlepipe.schemas.contract import InputSchema, OutputSchema, ensure_implements
 from singlepipe.schemas.image.base import ImageTaskInput
@@ -27,7 +26,6 @@ from singlepipe.schemas.image.classification import (
 )
 from singlepipe.schemas.modalities import Image
 from singlepipe.schemas.primitives import Prediction
-from singlepipe.tasks import TaskType
 from tests.constants import HEIGHT, WIDTH
 
 # Shaped like HF output, but deliberately NOT sorted by score.
@@ -160,7 +158,7 @@ class TestPredictionsOnHfOutput:
         assert unscored.predictions.filter_by_label("cat").labels == ["cat"]
 
 
-# ------------------------------------------------------------ Contract, registry
+# ------------------------------------------------------------------- Contract
 
 
 class TestContract:
@@ -173,9 +171,3 @@ class TestContract:
     )
     def test_implements_contract(self, schema: type, contract: type) -> None:
         ensure_implements(schema, contract)
-
-    def test_registered_in_registry(self) -> None:
-        input_schema, output_schema = get_schemas(TaskType.IMAGE_CLASSIFICATION)
-
-        assert input_schema is ImageClassificationInput
-        assert output_schema is ImageClassificationOutput

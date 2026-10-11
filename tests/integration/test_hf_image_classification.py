@@ -26,12 +26,15 @@ pytest.importorskip("torch")
 transformers = pytest.importorskip("transformers")
 
 from singlepipe.adapters.hf_adapter import HFAdapter  # noqa: E402
+from singlepipe.schemas.image.base import ImageTaskInput  # noqa: E402
 from singlepipe.schemas.image.classification import (  # noqa: E402
     ImageClassificationInput,
     ImageClassificationOutput,
 )
 from singlepipe.schemas.primitives import Prediction  # noqa: E402
-from singlepipe.tasks import TaskType  # noqa: E402
+from singlepipe.tasks import Task, image_classification  # noqa: E402
+
+ClassifierAdapter = HFAdapter[ImageClassificationInput, ImageClassificationOutput]
 
 ASSETS = Path(__file__).parent.parent / "assets"
 CATS_IMAGE = ASSETS / "cats.jpg"
@@ -81,24 +84,24 @@ def tiny_model_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 @pytest.fixture(scope="module")
-def tiny_adapter(tiny_model_dir: Path) -> HFAdapter:
-    return HFAdapter(str(tiny_model_dir), TaskType.IMAGE_CLASSIFICATION)
+def tiny_adapter(tiny_model_dir: Path) -> ClassifierAdapter:
+    return HFAdapter(str(tiny_model_dir), image_classification)
 
 
 class TestTinyModel:
-    def test_output_contract(self, tiny_adapter: HFAdapter) -> None:
+    def test_output_contract(self, tiny_adapter: ClassifierAdapter) -> None:
         output = tiny_adapter(PILImage.new("RGB", (64, 48)))
 
         # Default top_k=5 is capped by the number of classes.
         assert_valid_output(output, expected_len=len(TINY_LABELS))
 
-    def test_labels_come_from_model_config(self, tiny_adapter: HFAdapter) -> None:
+    def test_labels_come_from_model_config(self, tiny_adapter: ClassifierAdapter) -> None:
         output = tiny_adapter(PILImage.new("RGB", (64, 48)))
 
         assert isinstance(output, ImageClassificationOutput)
         assert set(output.predictions.labels) == set(TINY_LABELS.values())
 
-    def test_scores_are_softmax_probabilities(self, tiny_adapter: HFAdapter) -> None:
+    def test_scores_are_softmax_probabilities(self, tiny_adapter: ClassifierAdapter) -> None:
         """All classes returned, so the probabilities must sum to one."""
         output = tiny_adapter(PILImage.new("RGB", (64, 48)))
 
@@ -106,7 +109,7 @@ class TestTinyModel:
         total = sum(p.score or 0.0 for p in output.predictions)
         assert math.isclose(total, 1.0, abs_tol=1e-4)
 
-    def test_label_id_is_not_filled_yet(self, tiny_adapter: HFAdapter) -> None:
+    def test_label_id_is_not_filled_yet(self, tiny_adapter: ClassifierAdapter) -> None:
         """Documents the known TODO: HFAdapter does not map label -> label_id.
 
         When label2id mapping is implemented, flip this assertion.
@@ -125,12 +128,11 @@ class TestTinyModel:
             pytest.param(lambda path: path.read_bytes(), id="bytes"),
             pytest.param(lambda path: np.asarray(PILImage.open(path)), id="ndarray"),
             pytest.param(lambda path: ImageClassificationInput.from_raw(path), id="schema"),
-            pytest.param(lambda path: {"image": path}, id="dict"),
         ],
     )
     def test_accepts_every_input_form(
         self,
-        tiny_adapter: HFAdapter,
+        tiny_adapter: ClassifierAdapter,
         tmp_path: Path,
         make_input: Callable[[Path], object],
     ) -> None:
@@ -140,9 +142,22 @@ class TestTinyModel:
         assert_valid_output(tiny_adapter(make_input(path)), expected_len=len(TINY_LABELS))
 
     def test_top_k_is_forwarded_to_pipeline(self, tiny_model_dir: Path) -> None:
-        adapter = HFAdapter(str(tiny_model_dir), TaskType.IMAGE_CLASSIFICATION, top_k=1)
+        adapter = HFAdapter(str(tiny_model_dir), image_classification, top_k=1)
 
         assert_valid_output(adapter(PILImage.new("RGB", (64, 48))), expected_len=1)
+
+    def test_task_by_name(self, tiny_model_dir: Path) -> None:
+        """The string form for configs: same result, output typed only loosely."""
+        adapter = HFAdapter(str(tiny_model_dir), "image-classification")
+
+        assert_valid_output(adapter(PILImage.new("RGB", (64, 48))), expected_len=len(TINY_LABELS))
+
+    def test_custom_task_runs_on_hf_pipeline(self, tiny_model_dir: Path) -> None:
+        """A custom task, named outside HF's vocabulary, picks the pipeline itself."""
+        my_task = Task("my-classifier", ImageTaskInput, ImageClassificationOutput)
+        adapter = HFAdapter(str(tiny_model_dir), my_task, hf_task="image-classification")
+
+        assert_valid_output(adapter(PILImage.new("RGB", (64, 48))), expected_len=len(TINY_LABELS))
 
 
 # ------------------------------------------------------------ pretrained model
@@ -159,16 +174,18 @@ def cats_image() -> Path:
 
 
 @pytest.fixture(scope="module")
-def pretrained_adapter() -> HFAdapter:
-    return HFAdapter(PRETRAINED_MODEL, TaskType.IMAGE_CLASSIFICATION)
+def pretrained_adapter() -> ClassifierAdapter:
+    return HFAdapter(PRETRAINED_MODEL, image_classification)
 
 
 @pytest.mark.slow
 class TestPretrainedViT:
-    def test_output_contract(self, pretrained_adapter: HFAdapter, cats_image: Path) -> None:
+    def test_output_contract(self, pretrained_adapter: ClassifierAdapter, cats_image: Path) -> None:
         assert_valid_output(pretrained_adapter(cats_image), expected_len=5)
 
-    def test_recognises_a_cat(self, pretrained_adapter: HFAdapter, cats_image: Path) -> None:
+    def test_recognises_a_cat(
+        self, pretrained_adapter: ClassifierAdapter, cats_image: Path
+    ) -> None:
         """ImageNet has several cat classes (tabby, tiger cat, Egyptian cat, ...)."""
         output = pretrained_adapter(cats_image)
 
@@ -179,7 +196,7 @@ class TestPretrainedViT:
         assert best.score is not None and best.score > 0.3
 
     def test_filters_work_on_real_output(
-        self, pretrained_adapter: HFAdapter, cats_image: Path
+        self, pretrained_adapter: ClassifierAdapter, cats_image: Path
     ) -> None:
         output = pretrained_adapter(cats_image)
 

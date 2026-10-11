@@ -1,102 +1,43 @@
-"""Tasks: what a model does, as names and as typed objects.
+"""Tasks: what a model does, as typed objects.
 
-``TaskType`` is the vocabulary of task names. Its values match HuggingFace
-``transformers.pipeline`` task strings wherever an HF pipeline exists.
+A task is defined by its input and output schemas. ``Task`` binds a name to
+these two schemas, with their types: an adapter that takes a ``Task`` can type
+its output as the task's output schema, so users get autocompletion without
+``cast``.
 
-``Task`` binds a name to the input and output schemas of a task, with their types:
-an adapter that takes a ``Task`` can type its output as the task's output schema.
+Built-in tasks are ready objects in this module (``image_classification``,
+``object_detection``), so users never write schema names for them. A custom
+task is one line, written once and passed around like a built-in one::
+
+    is_cat = Task("is-cat", ImageTaskInput, IsCat)
+
+Strings from configs and CLIs are resolved to built-in tasks by ``get_task``.
+
+There is no enum of task names. A task is implemented exactly when a ``Task``
+object exists for it; planned tasks are tracked in ``tasks.md``, not in code.
+
+The name is only a name. Which backend runs a task, and how (for example,
+which HuggingFace pipeline), is the adapter's concern. For built-in tasks that
+have an HF pipeline the name matches the HF pipeline string, so ``HFAdapter``
+can use it as a default.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from enum import StrEnum
+from types import MappingProxyType
 from typing import Any, Generic, TypeVar
 
-from singlepipe.schemas.contract import InputSchema, OutputSchema
+from singlepipe.schemas.contract import InputSchema, OutputSchema, ensure_implements
 from singlepipe.schemas.image.classification import (
     ImageClassificationInput,
     ImageClassificationOutput,
 )
-
-
-class TaskType(StrEnum):
-    """Semantic identifier of an ML task in SinglePipe.
-
-    ``TaskType`` is the vocabulary the schema registry keys on:
-    each member corresponds to a pair of input/output schemas
-    describing the contract of that task.
-
-    Enum values are intentionally aligned with HuggingFace
-    ``transformers.pipeline`` task strings whenever a matching HF
-    pipeline exists — this lets ``HFAdapter`` pass the value straight
-    through without a lookup table. Tasks with no HF equivalent
-    (``TABULAR_CLASSIFICATION``, ``TABULAR_REGRESSION``, ``OCR``)
-    keep values chosen for readability; they are served by other
-    adapters.
-
-    Because ``TaskType`` inherits from ``StrEnum``, members compare
-    equal to their string values and can be used interchangeably
-    with strings — in dict keys, HF pipeline arguments, JSON, etc.
-
-    The enum grows as new tasks gain first-class support. A member
-    listed here is *known* to SinglePipe; whether schemas are actually
-    registered for it is a separate question answered by the registry
-    (``get_schemas`` raises a descriptive error for known-but-
-    unregistered tasks).
-
-    Examples
-    --------
-    >>> TaskType.OBJECT_DETECTION == "object-detection"
-    True
-    >>> TaskType.OBJECT_DETECTION.value
-    'object-detection'
-    """
-
-    # Image
-    IMAGE_CLASSIFICATION = "image-classification"
-    IMAGE_SEGMENTATION = "image-segmentation"
-    OBJECT_DETECTION = "object-detection"
-    DEPTH_ESTIMATION = "depth-estimation"
-    IMAGE_EMBEDDING = "image-feature-extraction"
-    ZERO_SHOT_IMAGE_CLASSIFICATION = "zero-shot-image-classification"
-    ZERO_SHOT_OBJECT_DETECTION = "zero-shot-object-detection"
-    MASK_GENERATION = "mask-generation"
-    KEYPOINT_MATCHING = "keypoint-matching"
-
-    # Text
-    TEXT_CLASSIFICATION = "text-classification"
-    TOKEN_CLASSIFICATION = "token-classification"
-    TEXT_GENERATION = "text-generation"
-    TEXT2TEXT_GENERATION = "text2text-generation"
-    FILL_MASK = "fill-mask"
-    SUMMARIZATION = "summarization"
-    TRANSLATION = "translation"
-    QUESTION_ANSWERING = "question-answering"
-    TEXT_EMBEDDING = "feature-extraction"
-    ZERO_SHOT_TEXT_CLASSIFICATION = "zero-shot-classification"
-
-    # Audio
-    AUDIO_CLASSIFICATION = "audio-classification"
-    SPEECH_TO_TEXT = "automatic-speech-recognition"
-    TEXT_TO_AUDIO = "text-to-audio"
-    ZERO_SHOT_AUDIO_CLASSIFICATION = "zero-shot-audio-classification"
-
-    # Vidio
-    VIDEO_CLASSIFICATION = "video-classification"
-
-    # Multimodel
-    IMAGE_TEXT_TO_TEXT = "image-text-to-text"
-    DOCUMENT_QUESTION_ANSWERING = "document-question-answering"
-    TABLE_QUESTION_ANSWERING = "table-question-answering"
-
-    # Table
-    TABULAR_CLASSIFICATION = "tabular-classification"
-    TABULAR_REGRESSION = "tabular-regression"
-
-    # OCR
-    OCR = "ocr"
-
+from singlepipe.schemas.image.detection import (
+    ObjectDetectionInput,
+    ObjectDetectionOutput,
+)
 
 # --------------------------------------------------------------------- Task
 
@@ -110,21 +51,67 @@ class Task(Generic[InT, OutT]):
 
     The type parameters are inferred from the constructor, nobody writes them::
 
-        is_cat = Task(TaskType.IMAGE_CLASSIFICATION, ImageTaskInput, IsCat)
+        is_cat = Task("is-cat", ImageTaskInput, IsCat)
         # Task[ImageTaskInput, IsCat]
 
-    ``name`` is the task's name and, for ``HFAdapter``, the HF pipeline to run.
-    A custom task can reuse a built-in HF pipeline with its own schemas, or use
-    any name for backends without HF pipelines.
+    ``name`` identifies the task in logs, errors and string lookups. It says
+    nothing about the backend: a custom task can run on an HF model, a torch
+    module or any other library, depending on the adapter.
+
+    Both schemas are checked on creation with ``ensure_implements``: each must be
+    a class that inherits its contract and has no abstract methods left. mypy
+    catches swapped or foreign schemas statically; this check catches them at
+    runtime too, with a ``TypeError`` that names the problem.
+
+    Raises
+    ------
+    TypeError
+        If ``input_schema`` does not implement ``InputSchema`` or
+        ``output_schema`` does not implement ``OutputSchema``.
     """
 
     name: str
     input_schema: type[InT]
     output_schema: type[OutT]
 
+    def __post_init__(self) -> None:
+        ensure_implements(self.input_schema, InputSchema)
+        ensure_implements(self.output_schema, OutputSchema)
+
 
 # ----------------------------------------------------------- built-in tasks
 
 image_classification = Task(
-    TaskType.IMAGE_CLASSIFICATION, ImageClassificationInput, ImageClassificationOutput
+    "image-classification", ImageClassificationInput, ImageClassificationOutput
 )
+
+object_detection = Task("object-detection", ObjectDetectionInput, ObjectDetectionOutput)
+
+_BUILTIN_TASKS: Mapping[str, Task[Any, Any]] = MappingProxyType(
+    {task.name: task for task in (image_classification, object_detection)}
+)
+
+
+# ------------------------------------------------------------------- lookup
+
+
+def get_task(name: str) -> Task[Any, Any]:
+    """Return the built-in task with this name.
+
+    This is the bridge for strings from configs and CLIs. The schemas of the
+    returned task are not known statically, so code that wants a typed output
+    should pass the task object (``image_classification``) instead.
+
+    Raises
+    ------
+    ValueError
+        If no built-in task has this name. The message lists the built-in tasks.
+    """
+    try:
+        return _BUILTIN_TASKS[name]
+    except KeyError:
+        known = ", ".join(sorted(_BUILTIN_TASKS))
+        raise ValueError(
+            f"Unknown task {name!r}. Built-in tasks: {known}. "
+            "For a custom task, pass a Task object instead of a string."
+        ) from None

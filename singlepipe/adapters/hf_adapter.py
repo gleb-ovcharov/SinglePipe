@@ -1,108 +1,163 @@
-from typing import TYPE_CHECKING, Any
+"""HuggingFace adapter: runs a SinglePipe task on a ``transformers.pipeline``.
+
+The adapter is the typed boundary around an HF pipeline. It takes a ``Task``
+and gets both schemas from it, so its output type is the task's output schema:
+for mypy, ``HFAdapter(model, image_classification)(x)`` is an
+``ImageClassificationOutput``, without ``cast``.
+
+Which pipeline to run is HF's vocabulary, not ours. By default it is the task's
+name (built-in tasks are named after HF pipelines); a custom task on top of an
+HF model passes it explicitly as ``hf_task``. The pipeline name is checked
+against HF's task registry before the model is loaded, so a typo fails at once,
+not after a download.
+
+How a raw input is understood is the input schema's business (``from_raw``);
+the adapter does not inspect inputs itself.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Generic, overload
 
 from transformers import pipeline as hf_pipeline
+from transformers.pipelines import PIPELINE_REGISTRY
 
-from singlepipe.schemas import get_schemas
-from singlepipe.tasks import TaskType
-
-if TYPE_CHECKING:
-    pass
+from singlepipe.schemas.contract import InputSchema, OutputSchema
+from singlepipe.tasks import InT, OutT, Task, get_task
 
 
-class HFAdapter:
-    """Typed adapter around ``transformers.pipeline`` for a specific task.
+class HFAdapter(Generic[InT, OutT]):
+    """Typed adapter around ``transformers.pipeline`` for one task.
 
-    Wraps a HuggingFace pipeline with SinglePipe's input/output schemas:
-    the raw input is validated and normalized into the schema's canonical
-    form, the pipeline is invoked, and its raw output is validated and
-    materialized as a typed SinglePipe output object.
-
-    The heavy work (loading the model, tokenizer/processor, and running
-    pre- and post-processing) is delegated to ``transformers.pipeline``.
-    This class only enforces the typed boundary on both sides.
+    The raw input is validated and normalised by the task's input schema, the
+    pipeline runs, and its raw output becomes the task's output schema. Model
+    loading and pre- and post-processing are done by ``transformers.pipeline``;
+    this class only enforces the typed boundary on both sides.
 
     Parameters
     ----------
-    model_name:
-        HuggingFace model id (e.g. ``"facebook/detr-resnet-50"``) or a
-        local path to model weights.
+    model:
+        HuggingFace model id (e.g. ``"facebook/detr-resnet-50"``) or a local
+        path to model weights.
     task:
-        SinglePipe task identifier. Its ``.value`` must match a valid
-        ``transformers.pipeline`` task string (e.g. ``"object-detection"``).
-        Determines which input/output schemas are pulled from the registry.
+        A ``Task`` object (typed output), or the name of a built-in task
+        (output typed only as ``OutputSchema``; for configs and CLIs).
+    hf_task:
+        HF pipeline to run. Defaults to the task's name, which is right for
+        built-in tasks. Required for a custom task whose name is not an HF
+        pipeline.
     device:
-        Device to place the model on. ``None`` = CPU, an ``int`` = CUDA
-        device index, or a device string such as ``"cpu"`` or ``"cuda:0"``.
+        Device to place the model on: ``None`` (HF default), a CUDA device
+        index, or a string such as ``"cpu"`` or ``"cuda:0"``.
     **pipeline_kwargs:
         Extra keyword arguments passed straight to ``transformers.pipeline``
-        (e.g. ``torch_dtype``, ``trust_remote_code``, ``revision``).
+        (e.g. ``top_k``, ``revision``, ``trust_remote_code``).
 
-    Attributes
-    ----------
-    model_name : str
-        The model id or path this adapter was constructed with.
-    task : TaskType
-        The task this adapter is bound to.
-    pipeline : transformers.Pipeline
-        The underlying HuggingFace pipeline instance.
+    Raises
+    ------
+    ValueError
+        If ``task`` is a string that names no built-in task, or if the HF
+        pipeline name is unknown to ``transformers``. Both are raised before
+        the model is loaded.
 
     Examples
     --------
-    >>> adapter = HFAdapter("facebook/detr-resnet-50", TaskType.OBJECT_DETECTION)
-    >>> result = adapter("http://images.cocodataset.org/val2017/000000039769.jpg")
-    >>> for det in result:
+    >>> from singlepipe.tasks import object_detection
+    >>> detector = HFAdapter("facebook/detr-resnet-50", object_detection)
+    >>> out = detector("http://images.cocodataset.org/val2017/000000039769.jpg")
+    >>> for det in out.predictions.filter_by_score(0.9):
     ...     print(det.label, det.score, det.box.as_tuple())
+
+    A custom task on top of an HF pipeline::
+
+        is_cat = Task("is-cat", ImageTaskInput, IsCat)
+        adapter = HFAdapter("google/vit-base-patch16-224", is_cat,
+                            hf_task="image-classification")
 
     Notes
     -----
-    - The model is loaded once at construction; subsequent calls reuse it.
-    - Batching, streaming, and async execution are not supported at this
-      layer — one input, one output per call.
-    - Task↔model compatibility is not pre-validated: mismatches surface as
-      errors from ``transformers.pipeline`` at construction time.
+    - The model is loaded once at construction; calls reuse it.
+    - One input, one output per call. Batching and async execution are
+      planned at this layer (``architecture.md``, section 12).
     """
+
+    @overload
+    def __init__(
+        self: HFAdapter[InT, OutT],
+        model: str,
+        task: Task[InT, OutT],
+        *,
+        hf_task: str | None = None,
+        device: int | str | None = None,
+        **pipeline_kwargs: Any,
+    ) -> None: ...
+
+    @overload
+    def __init__(
+        self: HFAdapter[InputSchema[Any], OutputSchema],
+        model: str,
+        task: str,
+        *,
+        hf_task: str | None = None,
+        device: int | str | None = None,
+        **pipeline_kwargs: Any,
+    ) -> None: ...
 
     def __init__(
         self,
-        model_name: str,
-        task: TaskType,
+        model: str,
+        task: Task[Any, Any] | str,
+        *,
+        hf_task: str | None = None,
         device: int | str | None = None,
         **pipeline_kwargs: Any,
     ) -> None:
-        self.model_name = model_name
-        self.task = task
+        resolved = get_task(task) if isinstance(task, str) else task
+        pipeline_name = resolved.name if hf_task is None else hf_task
+        _check_hf_task(pipeline_name, resolved)
 
-        self.pipeline = hf_pipeline(  # type: ignore[call-overload]  # task is a runtime str
-            task=task.value,
-            model=model_name,
+        self.model = model
+        self.task: Task[InT, OutT] = resolved
+        self.hf_task = pipeline_name
+        self.pipeline = hf_pipeline(  # type: ignore[call-overload]  # runtime str
+            task=pipeline_name,
+            model=model,
             device=device,
             **pipeline_kwargs,
         )
 
-        self._input_schema, self._output_schema = get_schemas(task)
+    def __call__(self, raw: object) -> OutT:
+        """Validate ``raw`` with the task's input schema and run the model."""
+        return self._predict(self.task.input_schema.from_raw(raw))
 
-    def __call__(self, raw_input):
+    def _predict(self, validated: InT) -> OutT:
+        """Run the pipeline on an already validated input.
 
-        if isinstance(raw_input, self._input_schema):
-            validated_in = raw_input
-        elif isinstance(raw_input, dict):
-            validated_in = self._input_schema.model_validate(raw_input)
-        else:
-            validated_in = self._input_schema.from_raw(raw_input)
-
-        raw_output = self.pipeline(validated_in.to_pipeline_input())
-
-        return self._output_schema.from_pipeline_output(raw_output, **validated_in.output_context)
+        Kept separate from ``__call__``: the planned async wrapper runs this in
+        the model's worker thread, and tests can call it without raw inputs.
+        """
+        raw_output = self.pipeline(validated.to_pipeline_input())
+        return self.task.output_schema.from_pipeline_output(raw_output, **validated.output_context)
 
     def __repr__(self) -> str:
-        return f"HFAdapter(model={self.model_name!r}, task={self.task.value!r})"
+        parts = [f"model={self.model!r}", f"task={self.task.name!r}"]
+        if self.hf_task != self.task.name:
+            parts.append(f"hf_task={self.hf_task!r}")
+        return f"HFAdapter({', '.join(parts)})"
 
 
-if __name__ == "__main__":
-    adapter = HFAdapter("facebook/detr-resnet-50", TaskType.OBJECT_DETECTION)
-    print(adapter)
+# ------------------------------------------------------------------ helpers
 
-    result = adapter("http://images.cocodataset.org/val2017/000000039769.jpg")
-    print(f"Found {len(result)} objects")
-    for det in result:
-        print(f"  {det.label}: {det.score:.3f}")
+
+def _check_hf_task(name: str, task: Task[Any, Any]) -> None:
+    """Fail before loading the model if HF has no pipeline called ``name``."""
+    try:
+        PIPELINE_REGISTRY.check_task(name)
+    except KeyError:
+        hint = (
+            f" Task {task.name!r} is not an HF pipeline: pass the pipeline to "
+            "run as hf_task=..., e.g. hf_task='image-classification'."
+            if name == task.name
+            else ""
+        )
+        raise ValueError(f"Unknown HF pipeline {name!r}.{hint}") from None
