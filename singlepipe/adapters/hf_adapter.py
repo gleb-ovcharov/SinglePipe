@@ -13,10 +13,20 @@ not after a download.
 
 How a raw input is understood is the input schema's business (``from_raw``);
 the adapter does not inspect inputs itself.
+
+Calls are async, but nothing heavy runs on the event loop. Validation can load a
+URL and decode an image, so it runs in the loop's default thread pool. The
+forward pass runs in the adapter's own worker thread: one thread per model,
+which is what GPU memory and HF pipelines (not thread-safe) want, and torch
+releases the GIL there, so different models really compute in parallel. The
+event loop only orchestrates: independent models overlap, and a server keeps
+accepting requests while a model computes.
 """
 
 from __future__ import annotations
 
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Generic, overload
 
 from transformers import pipeline as hf_pipeline
@@ -64,9 +74,12 @@ class HFAdapter(Generic[InT, OutT]):
     --------
     >>> from singlepipe.tasks import object_detection
     >>> detector = HFAdapter("facebook/detr-resnet-50", object_detection)
-    >>> out = detector("http://images.cocodataset.org/val2017/000000039769.jpg")
+    >>> out = await detector("http://images.cocodataset.org/val2017/000000039769.jpg")
     >>> for det in out.predictions.filter_by_score(0.9):
     ...     print(det.label, det.score, det.box.as_tuple())
+
+    In a script, run it with ``asyncio.run(...)``; in Jupyter, ``await`` works
+    directly in a cell.
 
     A custom task on top of an HF pipeline::
 
@@ -76,9 +89,12 @@ class HFAdapter(Generic[InT, OutT]):
 
     Notes
     -----
-    - The model is loaded once at construction; calls reuse it.
-    - One input, one output per call. Batching and async execution are
-      planned at this layer (``architecture.md``, section 12).
+    - The model is loaded once at construction (synchronously); calls reuse it.
+    - Calls to one adapter run one at a time in its worker thread; calls to
+      different adapters run in parallel.
+    - One input, one output per call. Batching is planned at this layer
+      (``architecture.md``, section 12.4).
+    - Needs an asyncio event loop.
     """
 
     @overload
@@ -119,25 +135,60 @@ class HFAdapter(Generic[InT, OutT]):
         self.model = model
         self.task: Task[InT, OutT] = resolved
         self.hf_task = pipeline_name
-        self.pipeline = hf_pipeline(  # type: ignore[call-overload]  # runtime str
+        self.pipeline: Any = hf_pipeline(  # type: ignore[call-overload]  # runtime str
             task=pipeline_name,
             model=model,
             device=device,
             **pipeline_kwargs,
         )
+        self._executor = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix=f"singlepipe-{resolved.name}"
+        )
+        self._closed = False
 
-    def __call__(self, raw: object) -> OutT:
-        """Validate ``raw`` with the task's input schema and run the model."""
-        return self._predict(self.task.input_schema.from_raw(raw))
+    async def __call__(self, raw: object) -> OutT:
+        """Validate ``raw`` with the task's input schema and run the model.
+
+        Validation runs in the event loop's default thread pool (it may load a
+        URL), the forward pass in this adapter's worker thread.
+
+        Raises
+        ------
+        pydantic.ValidationError
+            If ``raw`` is not a valid input; the model is not called.
+        RuntimeError
+            If the adapter is closed.
+        """
+        self._ensure_open()
+        validated = await asyncio.to_thread(self.task.input_schema.from_raw, raw)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(self._executor, self._predict, validated)
 
     def _predict(self, validated: InT) -> OutT:
-        """Run the pipeline on an already validated input.
+        """Run the pipeline on an already validated input, synchronously.
 
-        Kept separate from ``__call__``: the planned async wrapper runs this in
-        the model's worker thread, and tests can call it without raw inputs.
+        This is the whole computation; ``__call__`` only decides where it runs.
         """
         raw_output = self.pipeline(validated.to_pipeline_input())
         return self.task.output_schema.from_pipeline_output(raw_output, **validated.output_context)
+
+    def close(self) -> None:
+        """Stop the worker thread and release the model.
+
+        Waits for calls already submitted to finish; new calls raise
+        ``RuntimeError``. Closing twice is harmless. Without ``close`` the
+        thread ends at interpreter exit, so it is only needed to free the model
+        earlier.
+        """
+        if self._closed:
+            return
+        self._closed = True
+        self._executor.shutdown(wait=True)
+        del self.pipeline
+
+    def _ensure_open(self) -> None:
+        if self._closed:
+            raise RuntimeError(f"{self!r} is closed")
 
     def __repr__(self) -> str:
         parts = [f"model={self.model!r}", f"task={self.task.name!r}"]
