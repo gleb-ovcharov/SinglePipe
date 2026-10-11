@@ -4,12 +4,17 @@
 source to an RGB ``PIL.Image.Image`` and plugs into pydantic through
 ``__get_pydantic_core_schema__``, so it works as a field type in schemas
 (and therefore in FastAPI) without inheriting the ``BaseModel`` interface.
+
+torch tensors are accepted, but torch is never imported here: it is an optional
+extra and takes seconds to import. A tensor can only exist if the caller has
+already imported torch, so the check looks it up in ``sys.modules``.
 """
 
 from __future__ import annotations
 
 import base64
 import io
+import sys
 from pathlib import Path
 from typing import IO, Any
 
@@ -20,12 +25,11 @@ from pydantic import GetCoreSchemaHandler, GetJsonSchemaHandler
 from pydantic.json_schema import JsonSchemaValue
 from pydantic_core import core_schema
 
-try:
-    import torch
 
-    _TORCH_AVAILABLE = True
-except ImportError:
-    _TORCH_AVAILABLE = False
+def _is_torch_tensor(value: object) -> bool:
+    """True if ``value`` is a torch tensor, without importing torch."""
+    torch = sys.modules.get("torch")
+    return torch is not None and isinstance(value, torch.Tensor)
 
 
 def _normalize_ndarray(array: np.ndarray) -> PILImage.Image:
@@ -119,7 +123,7 @@ def _to_pil(source: object) -> PILImage.Image:
     if isinstance(source, PILImage.Image):
         return source.convert("RGB")
 
-    if _TORCH_AVAILABLE and isinstance(source, torch.Tensor):
+    if _is_torch_tensor(source):
         return _normalize_tensor(source)
 
     if isinstance(source, np.ndarray):

@@ -1169,17 +1169,22 @@ dependencies = [
     { name = "numpy" },
     { name = "pillow" },
     { name = "pydantic" },
-    { name = "transformers" },
 ]
 
 [package.optional-dependencies]
 all = [
     { name = "timm" },
     { name = "torch" },
+    { name = "transformers" },
 ]
 detr = [
     { name = "timm" },
     { name = "torch" },
+    { name = "transformers" },
+]
+hf = [
+    { name = "torch" },
+    { name = "transformers" },
 ]
 torch = [
     { name = "torch" },
@@ -1187,9 +1192,11 @@ torch = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "anyio" },
     { name = "mypy" },
     { name = "pytest" },
     { name = "ruff" },
+    { name = "singlepipe", extra = ["all"] },
 ]
 
 [package.metadata]
@@ -1198,20 +1205,22 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.0" },
     { name = "pillow", specifier = ">=12.3.0" },
     { name = "pydantic", specifier = ">=2.13.4" },
-    { name = "timm", marker = "extra == 'all'", specifier = ">=1.0.28" },
+    { name = "singlepipe", extras = ["hf"], marker = "extra == 'detr'" },
+    { name = "singlepipe", extras = ["hf", "detr", "torch"], marker = "extra == 'all'" },
     { name = "timm", marker = "extra == 'detr'", specifier = ">=1.0.28" },
-    { name = "torch", marker = "extra == 'all'", specifier = ">=2.13.0" },
-    { name = "torch", marker = "extra == 'detr'", specifier = ">=2.13.0" },
+    { name = "torch", marker = "extra == 'hf'", specifier = ">=2.13.0" },
     { name = "torch", marker = "extra == 'torch'", specifier = ">=2.13.0" },
-    { name = "transformers", specifier = ">=5.14.1" },
+    { name = "transformers", marker = "extra == 'hf'", specifier = ">=5.14.1" },
 ]
-provides-extras = ["torch", "detr", "all"]
+provides-extras = ["hf", "detr", "torch", "all"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "anyio", specifier = ">=4" },
     { name = "mypy", specifier = ">=2.3.0" },
     { name = "pytest", specifier = ">=8" },
     { name = "ruff", specifier = ">=0.16.1" },
+    { name = "singlepipe", extras = ["all"] },
 ]
 
 [[package]]

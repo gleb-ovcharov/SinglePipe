@@ -29,11 +29,21 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Generic, overload
 
-from transformers import pipeline as hf_pipeline
-from transformers.pipelines import PIPELINE_REGISTRY
-
 from singlepipe.schemas.contract import InputSchema, OutputSchema
 from singlepipe.tasks import InT, OutT, Task, get_task
+
+_INSTALL_HINT = "pip install 'singlepipe[hf]'"
+
+try:
+    from transformers import pipeline as hf_pipeline
+    from transformers.pipelines import PIPELINE_REGISTRY
+    from transformers.utils.import_utils import is_torch_available
+except ModuleNotFoundError as error:
+    if error.name != "transformers":
+        raise  # transformers is there, something it needs is not: show the real error
+    raise ModuleNotFoundError(
+        f"HFAdapter requires transformers: {_INSTALL_HINT}", name="transformers"
+    ) from error
 
 
 class HFAdapter(Generic[InT, OutT]):
@@ -69,6 +79,9 @@ class HFAdapter(Generic[InT, OutT]):
         If ``task`` is a string that names no built-in task, or if the HF
         pipeline name is unknown to ``transformers``. Both are raised before
         the model is loaded.
+    ImportError
+        If torch is not installed: transformers cannot load models without it.
+        Also raised before the model is loaded.
 
     Examples
     --------
@@ -131,6 +144,8 @@ class HFAdapter(Generic[InT, OutT]):
         resolved = get_task(task) if isinstance(task, str) else task
         pipeline_name = resolved.name if hf_task is None else hf_task
         _check_hf_task(pipeline_name, resolved)
+        if not is_torch_available():
+            raise ImportError(f"HFAdapter needs torch to load models: {_INSTALL_HINT}")
 
         self.model = model
         self.task: Task[InT, OutT] = resolved

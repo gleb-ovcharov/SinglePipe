@@ -15,6 +15,8 @@ merely slower.
 from __future__ import annotations
 
 import asyncio
+import subprocess
+import sys
 import threading
 from collections.abc import Callable, Iterator
 from typing import Any, Self
@@ -72,8 +74,10 @@ class FakeFactory:
 
 @pytest.fixture
 def fake_hf(monkeypatch: pytest.MonkeyPatch) -> FakeFactory:
+    """Fake HF, and torch reported as present: these tests never load a model."""
     factory = FakeFactory()
     monkeypatch.setattr(hf_adapter, "hf_pipeline", factory)
+    monkeypatch.setattr(hf_adapter, "is_torch_available", lambda: True)
     return factory
 
 
@@ -129,6 +133,34 @@ class TestConstruction:
             HFAdapter("fake/model", image_classification, hf_task="imag-classification")
 
         assert fake_hf.created == []
+
+    def test_without_torch_fails_before_loading(
+        self, fake_hf: FakeFactory, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(hf_adapter, "is_torch_available", lambda: False)
+
+        with pytest.raises(ImportError, match=r"singlepipe\[hf\]"):
+            HFAdapter("fake/model", image_classification)
+
+        assert fake_hf.created == []
+
+    def test_without_transformers_import_names_the_extra(self) -> None:
+        """Simulated in a fresh interpreter: None in sys.modules blocks the import."""
+        code = (
+            "import sys; sys.modules['transformers'] = None\n"
+            "try:\n"
+            "    import singlepipe.adapters.hf_adapter\n"
+            "except ModuleNotFoundError as error:\n"
+            "    print(error.name, '|', error)\n"
+        )
+
+        result = subprocess.run(
+            [sys.executable, "-c", code], capture_output=True, text=True, check=True
+        )
+
+        assert result.stdout.strip() == (
+            "transformers | HFAdapter requires transformers: pip install 'singlepipe[hf]'"
+        )
 
     def test_custom_task_without_hf_task_gets_a_hint(self, fake_hf: FakeFactory) -> None:
         my_task = Task("my-classifier", ImageTaskInput, ImageClassificationOutput)
