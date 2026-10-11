@@ -325,13 +325,16 @@ async def shelf(image: Image) -> Counter[str]:
 
 ```python
 @dataclass(frozen=True)
-class Task(Generic[InT, OutT]):        # InT: InputSchema[Any], OutT: OutputSchema
+class Task(Generic[InT, OutT]):  # InT: InputSchema[Any], OutT: OutputSchema
     name: str
     input_schema: type[InT]
-    output_schema: type[OutT]          # __post_init__: ensure_implements для обеих
+    output_schema: type[OutT]  # __post_init__: ensure_implements для обеих
 
-image_classification = Task("image-classification", ImageClassificationInput, ImageClassificationOutput)
-object_detection     = Task("object-detection", ObjectDetectionInput, ObjectDetectionOutput)
+
+image_classification = Task(
+    "image-classification", ImageClassificationInput, ImageClassificationOutput
+)
+object_detection = Task("object-detection", ObjectDetectionInput, ObjectDetectionOutput)
 ```
 
 - **Встроенные задачи — готовые объекты**, имён схем пользователь не пишет: `HFAdapter(model, sp.tasks.object_detection)`.

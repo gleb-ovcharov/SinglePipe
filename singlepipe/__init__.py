@@ -7,9 +7,12 @@ imported from their modules, e.g. ``from singlepipe.adapters.hf_adapter import
 HFAdapter``.
 """
 
+from importlib.metadata import version
+
 from singlepipe import tasks
 from singlepipe.tasks import Task
 
-__version__ = "0.0.1"
+# One source of truth: the version in pyproject.toml, read from the installed metadata.
+__version__ = version("singlepipe")
 
 __all__ = ["Task", "tasks"]

@@ -1,7 +1,7 @@
 [project]
 name = "singlepipe"
-version = "0.0.1"
-description = "Typed interface for ML model inference across HuggingFace, PyTorch, and other backends"
+version = "0.1.0"
+description = "Typed, async, batching inference for ML models: pydantic schemas in and out, any backend"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
@@ -9,15 +9,16 @@ license-files = ["LICENSE"]
 authors = [
     { name = "Gleb", email = "glebov274@gmail.com" },
 ]
-keywords = ["ml", "inference", "huggingface", "pytorch", "pydantic", "typed"]
+keywords = ["ml", "inference", "huggingface", "pytorch", "pydantic", "typed", "async", "batching"]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
 ]
 # The core: schemas, validation, images. No ML backend here — each backend is an
 # extra, so a user who only needs one backend does not download the others.
@@ -64,6 +65,11 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["singlepipe*"]
+
+# PEP 561 marker: without it, mypy in users' projects treats singlepipe as untyped
+# and every adapter output becomes Any.
+[tool.setuptools.package-data]
+singlepipe = ["py.typed"]
 
 [tool.ruff]
 line-length = 100

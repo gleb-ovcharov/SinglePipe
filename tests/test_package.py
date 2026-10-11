@@ -29,3 +29,14 @@ class TestImport:
     def test_exposes_tasks(self) -> None:
         assert sp.tasks.image_classification is image_classification
         assert sp.Task is type(image_classification)
+
+    def test_version_matches_metadata(self) -> None:
+        from importlib.metadata import version
+
+        assert sp.__version__ == version("singlepipe")
+
+    def test_ships_typing_marker(self) -> None:
+        """PEP 561: without py.typed, mypy in users' projects sees no types at all."""
+        from importlib.resources import files
+
+        assert files("singlepipe").joinpath("py.typed").is_file()
