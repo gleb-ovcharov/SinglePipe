@@ -7,12 +7,12 @@ tasks can reuse them.
 - ``BBox`` — axis-aligned box geometry.
 - ``Prediction`` — label, confidence and class id; base class for the
   predictions of concrete tasks.
-- ``Classification`` — a ``Prediction`` for a whole input.
 - ``Detection`` — a ``Prediction`` located by a ``BBox``.
 """
 
 from __future__ import annotations
 
+import math
 from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
@@ -23,15 +23,19 @@ class BBox(BaseModel):
 
     Coordinates are absolute pixels with top-left origin. Must satisfy
     ``xmin < xmax`` and ``ymin < ymax``, so a box always has positive area.
-    Float values are allowed (sub-pixel precision).
+    Float values are allowed (sub-pixel precision); NaN and infinity are not.
+
+    A box may extend past the image on any side, negative coordinates included:
+    detectors that predict a center and a size do this for objects at the edge.
+    A box does not know the image size; ``clip`` cuts it to the image.
     """
 
     model_config = ConfigDict(frozen=True)
 
-    xmin: float = Field(ge=0, title="Left edge")
-    ymin: float = Field(ge=0, title="Top edge")
-    xmax: float = Field(ge=0, title="Right edge")
-    ymax: float = Field(ge=0, title="Bottom edge")
+    xmin: float = Field(allow_inf_nan=False, title="Left edge")
+    ymin: float = Field(allow_inf_nan=False, title="Top edge")
+    xmax: float = Field(allow_inf_nan=False, title="Right edge")
+    ymax: float = Field(allow_inf_nan=False, title="Bottom edge")
 
     @model_validator(mode="after")
     def _check_geometry(self) -> Self:
@@ -68,6 +72,7 @@ class BBox(BaseModel):
     def clip(self, image_width: float, image_height: float) -> Self | None:
         """Return a new box clipped to the image bounds.
 
+        All four sides are cut: ``[0, image_width] x [0, image_height]``.
         Returns ``None`` if nothing of the box is inside the image (including a
         box that only touches the image edge): such a box has no area left, and
         a box with zero area cannot exist.
@@ -77,14 +82,43 @@ class BBox(BaseModel):
         if image_width <= 0 or image_height <= 0:
             raise ValueError(f"Image size must be positive, got {image_width}x{image_height}")
 
-        xmin = min(self.xmin, image_width)
-        ymin = min(self.ymin, image_height)
+        xmin = max(self.xmin, 0.0)
+        ymin = max(self.ymin, 0.0)
         xmax = min(self.xmax, image_width)
         ymax = min(self.ymax, image_height)
 
         if xmin >= xmax or ymin >= ymax:
             return None
         return type(self)(xmin=xmin, ymin=ymin, xmax=xmax, ymax=ymax)
+
+    def scale(self, factor: float) -> Self:
+        """Scale the box about its center: ``factor`` times wider and taller.
+
+        ``scale(1.2)`` moves each edge out by 10% of the box's own side
+        (width for left and right, height for top and bottom); ``factor < 1``
+        shrinks the box, ``scale(1)`` returns the same coordinates.
+
+        The result may extend past the image; ``clip`` (or ``Image.crop``, which
+        clips by itself) cuts it. Near a border the cut side stops there while
+        the opposite side keeps its full growth.
+
+        This changes the box size, not the coordinate frame: it is not a rescale
+        of coordinates for a resized image.
+
+        Raises ValueError if ``factor`` is not a positive finite number.
+        """
+        if not (math.isfinite(factor) and factor > 0):
+            raise ValueError(f"Scale factor must be a positive finite number, got {factor}")
+
+        # Move edges rather than rebuild from the center: factor 1 is then exact.
+        dx = self.width * (factor - 1) / 2
+        dy = self.height * (factor - 1) / 2
+        return type(self)(
+            xmin=self.xmin - dx,
+            ymin=self.ymin - dy,
+            xmax=self.xmax + dx,
+            ymax=self.ymax + dy,
+        )
 
     def iou(self, other: BBox) -> float:
         """Intersection over Union with another box, in [0, 1]. 0 if disjoint."""

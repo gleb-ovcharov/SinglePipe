@@ -37,9 +37,22 @@ class TestBBoxValidation:
         with pytest.raises(ValidationError, match="must be greater than"):
             box(*coords)
 
-    def test_negative_coordinate_is_rejected(self) -> None:
+    def test_negative_coordinates_are_allowed(self) -> None:
+        """A box partly left of or above the image is valid geometry; ``clip`` cuts it."""
+        assert box(-5, -3, 10, 10).as_tuple() == (-5, -3, 10, 10)
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            pytest.param(math.nan, id="nan"),
+            pytest.param(math.inf, id="inf"),
+            pytest.param(-math.inf, id="-inf"),
+        ],
+    )
+    def test_non_finite_coordinate_is_rejected(self, value: float) -> None:
+        """NaN compares false with everything and would pass the xmin < xmax check."""
         with pytest.raises(ValidationError):
-            box(-1, 0, 10, 10)
+            box(value, 0, 10, 10)
 
     def test_is_frozen(self) -> None:
         b = box(0, 0, 10, 10)
@@ -87,12 +100,18 @@ class TestBBoxClip:
     def test_box_crossing_edges_is_cut(self) -> None:
         assert box(50, 60, 150, 160).clip(100, 120) == box(50, 60, 100, 120)
 
+    def test_box_crossing_left_and_top_is_cut(self) -> None:
+        assert box(-5, -3, 50, 60).clip(100, 100) == box(0, 0, 50, 60)
+
     @pytest.mark.parametrize(
         "coords",
         [
             pytest.param((150, 10, 200, 20), id="right-of-image"),
             pytest.param((10, 150, 20, 200), id="below-image"),
+            pytest.param((-20, 10, -5, 20), id="left-of-image"),
+            pytest.param((10, -20, 20, -5), id="above-image"),
             pytest.param((100, 10, 120, 20), id="touches-right-edge"),
+            pytest.param((-10, 10, 0, 20), id="touches-left-edge"),
         ],
     )
     def test_box_outside_image_returns_none(self, coords: tuple[float, ...]) -> None:
@@ -110,6 +129,71 @@ class TestBBoxClip:
         clipped = LabeledBox(xmin=0, ymin=0, xmax=200, ymax=200).clip(100, 100)
 
         assert type(clipped) is LabeledBox
+
+
+# --------------------------------------------------------------- BBox: scale
+
+
+class TestBBoxScale:
+    def test_factor_one_keeps_coordinates_exactly(self) -> None:
+        b = box(0.1, 0.2, 0.7, 0.3)
+
+        assert b.scale(1).as_tuple() == b.as_tuple()
+
+    def test_grows_about_center(self) -> None:
+        b = box(100, 50, 200, 150)
+
+        scaled = b.scale(2)
+
+        assert scaled == box(50, 0, 250, 200)
+        assert scaled.center == b.center
+
+    def test_each_edge_moves_by_half_of_the_growth(self) -> None:
+        """scale(1.2) == each edge out by 10% of its own side, also for a non-square box."""
+        scaled = box(100, 100, 300, 150).scale(1.2)  # 200 x 50
+
+        assert scaled.as_tuple() == pytest.approx((80, 95, 320, 155))
+
+    def test_shrinks_below_one(self) -> None:
+        assert box(100, 50, 200, 150).scale(0.5) == box(125, 75, 175, 125)
+
+    def test_may_extend_past_the_image(self) -> None:
+        """A box does not know the image size: cutting is ``clip`` (or ``Image.crop``)."""
+        assert box(10, 50, 110, 150).scale(2) == box(-40, 0, 160, 200)
+
+    def test_near_a_border_clip_keeps_the_opposite_growth(self) -> None:
+        """scale + clip: the side at the border stops, the other side grows fully."""
+        scaled = box(10, 50, 110, 150).scale(2).clip(1000, 1000)
+
+        assert scaled == box(0, 0, 160, 200)
+
+    @pytest.mark.parametrize(
+        "factor",
+        [
+            pytest.param(0, id="zero"),
+            pytest.param(-1.2, id="negative"),
+            pytest.param(math.nan, id="nan"),
+            pytest.param(math.inf, id="inf"),
+        ],
+    )
+    def test_non_positive_or_non_finite_factor_is_rejected(self, factor: float) -> None:
+        with pytest.raises(ValueError, match="positive finite number"):
+            box(0, 0, 10, 10).scale(factor)
+
+    def test_original_is_unchanged(self) -> None:
+        b = box(100, 50, 200, 150)
+
+        b.scale(2)
+
+        assert b == box(100, 50, 200, 150)
+
+    def test_returns_same_type_for_subclass(self) -> None:
+        class LabeledBox(BBox):
+            pass
+
+        scaled = LabeledBox(xmin=0, ymin=0, xmax=1, ymax=1).scale(2)
+
+        assert type(scaled) is LabeledBox
 
 
 # ----------------------------------------------------------------- BBox: iou
@@ -209,6 +293,12 @@ class TestDetection:
 
     def test_score_is_optional(self) -> None:
         assert Detection.model_validate({"label": "cat", "box": BOX}).score is None
+
+    def test_box_partly_outside_the_image_is_kept(self) -> None:
+        """An object at the left edge: the backend's negative coordinate is not rejected."""
+        raw = {"label": "cat", "box": {"xmin": -3, "ymin": 0, "xmax": 40, "ymax": 50}}
+
+        assert Detection.model_validate(raw).box.xmin == -3
 
     def test_box_is_required(self) -> None:
         with pytest.raises(ValidationError):
