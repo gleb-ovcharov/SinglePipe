@@ -8,6 +8,7 @@ of what it does does not depend on the backend at all, and lives here:
 - the computation runs in the adapter's own worker thread, one per model;
 - concurrent calls are batched (dynamic batching, ``architecture.md`` 12.4);
 - ``output_context`` is passed from each input to its output;
+- ``await adapter.map(items)`` runs every item concurrently, so they batch;
 - ``close()`` stops the thread and releases the model.
 
 A backend implements one method, ``run_batch``: backend inputs in, raw backend
@@ -35,11 +36,12 @@ import queue
 import threading
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from concurrent.futures import Future
 from dataclasses import dataclass
-from typing import Any, Generic
+from typing import Any, Generic, Literal, overload
 
+from singlepipe._fanout import gather_all, gather_settled
 from singlepipe.tasks import InT, OutT, Task
 
 
@@ -132,6 +134,44 @@ class Adapter(ABC, Generic[InT, OutT]):
         self._ensure_open()
         validated = await asyncio.to_thread(self.task.input_schema.from_raw, raw)
         return await asyncio.wrap_future(self._submit(validated))
+
+    @overload
+    async def map(
+        self, items: Iterable[object], *, errors: Literal["raise"] = "raise"
+    ) -> list[OutT]: ...
+    @overload
+    async def map(
+        self, items: Iterable[object], *, errors: Literal["collect"]
+    ) -> list[OutT | Exception]: ...
+    async def map(
+        self, items: Iterable[object], *, errors: Literal["raise", "collect"] = "raise"
+    ) -> list[OutT] | list[OutT | Exception]:
+        """Run every item through the model concurrently; results in input order.
+
+        All calls start at once, so the queue sees them together and they are
+        batched up to ``max_batch_size``. A loop of ``await adapter(x)`` would
+        send them one at a time.
+
+        ``errors="raise"`` (default): the first failure cancels the remaining
+        calls and is raised as is (a bad input is still a ``ValidationError``),
+        with a note naming the item's index. ``errors="collect"``: every call
+        runs; a failed item's exception, with the same note, takes its place in
+        the result, which the type reflects (``list[OutT | Exception]``).
+
+        Raises
+        ------
+        RuntimeError
+            If the adapter is closed, before any item is sent.
+        ValueError
+            If ``errors`` is neither ``"raise"`` nor ``"collect"``.
+        """
+        self._ensure_open()
+        name = f"{self!r}.map"
+        if errors == "raise":
+            return await gather_all(self.__call__, items, name=name)
+        if errors == "collect":
+            return await gather_settled(self.__call__, items, name=name)
+        raise ValueError(f'errors must be "raise" or "collect", got {errors!r}')
 
     def _submit(self, validated: InT) -> Future[OutT]:
         future: Future[OutT] = Future()
