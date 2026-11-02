@@ -1,6 +1,6 @@
 [project]
 name = "singlepipe"
-version = "0.1.0"
+version = "0.2.0"
 description = "Typed, async, batching inference for ML models: pydantic schemas in and out, any backend"
 readme = "README.md"
 requires-python = ">=3.12"
