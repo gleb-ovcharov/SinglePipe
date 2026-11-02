@@ -11,6 +11,7 @@ from importlib.metadata import version
 
 from singlepipe import tasks
 from singlepipe.tasks import Task
+from singlepipe import ops
 
 # One source of truth: the version in pyproject.toml, read from the installed metadata.
 __version__ = version("singlepipe")
