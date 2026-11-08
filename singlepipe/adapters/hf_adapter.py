@@ -59,6 +59,8 @@ class HFAdapter(Adapter[InT, OutT]):
         index, or a string such as ``"cpu"`` or ``"cuda:0"``.
     max_batch_size, max_wait_ms:
         Dynamic batching, see ``Adapter``. Defaults: no batching.
+    name:
+        Name as a graph node, see ``Adapter``. Default: ``model``.
     **pipeline_kwargs:
         Extra keyword arguments passed straight to ``transformers.pipeline``
         (e.g. ``top_k``, ``revision``, ``trust_remote_code``).
@@ -86,9 +88,8 @@ class HFAdapter(Adapter[InT, OutT]):
 
     Batching concurrent calls, e.g. the crops of one image::
 
-        classifier = HFAdapter("my-org/sku-vit", image_classification,
-                               max_batch_size=16, max_wait_ms=5)
-        results = await asyncio.gather(*(classifier(crop) for crop in crops))
+        classifier = HFAdapter("my-org/sku-vit", image_classification, max_batch_size=16)
+        results = await classifier.map(crops)
 
     A custom task on top of an HF pipeline::
 
@@ -107,6 +108,7 @@ class HFAdapter(Adapter[InT, OutT]):
         device: int | str | None = None,
         max_batch_size: int = 1,
         max_wait_ms: float = 0,
+        name: str | None = None,
         **pipeline_kwargs: Any,
     ) -> None: ...
 
@@ -120,6 +122,7 @@ class HFAdapter(Adapter[InT, OutT]):
         device: int | str | None = None,
         max_batch_size: int = 1,
         max_wait_ms: float = 0,
+        name: str | None = None,
         **pipeline_kwargs: Any,
     ) -> None: ...
 
@@ -132,6 +135,7 @@ class HFAdapter(Adapter[InT, OutT]):
         device: int | str | None = None,
         max_batch_size: int = 1,
         max_wait_ms: float = 0,
+        name: str | None = None,
         **pipeline_kwargs: Any,
     ) -> None:
         resolved = get_task(task) if isinstance(task, str) else task
@@ -149,7 +153,12 @@ class HFAdapter(Adapter[InT, OutT]):
             **pipeline_kwargs,
         )
         # After loading: this starts the worker thread.
-        super().__init__(resolved, max_batch_size=max_batch_size, max_wait_ms=max_wait_ms)
+        super().__init__(
+            resolved,
+            max_batch_size=max_batch_size,
+            max_wait_ms=max_wait_ms,
+            name=model if name is None else name,
+        )
 
     def run_batch(self, inputs: Sequence[Any]) -> Sequence[Any]:
         """One input: a plain pipeline call. Several: HF batches the list itself."""

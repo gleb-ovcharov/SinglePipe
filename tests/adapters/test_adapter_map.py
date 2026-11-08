@@ -96,7 +96,10 @@ class TestRaise:
         with pytest.raises(ValidationError) as caught:
             await adapter.map([1, 2, "not a number", 4])
 
-        assert caught.value.__notes__ == ["TenTimes(task='numbers').map: item at index 2 of 4"]
+        assert caught.value.__notes__ == [
+            "in node: TenTimes(numbers)",
+            "TenTimes(numbers).map: item at index 2 of 4",
+        ]
 
 
 class TestCollect:
@@ -130,7 +133,10 @@ class TestCollect:
         assert results[0] is results[1] is results[2]
         error = results[0]
         assert isinstance(error, RuntimeError)
-        assert error.__notes__ == ["TenTimes(task='numbers').map: items at indices 0, 1, 2 of 3"]
+        assert error.__notes__ == [
+            "in node: TenTimes(numbers)",
+            "TenTimes(numbers).map: items at indices 0, 1, 2 of 3",
+        ]
 
 
 class TestArguments:

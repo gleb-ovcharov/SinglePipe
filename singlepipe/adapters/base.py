@@ -9,6 +9,8 @@ of what it does does not depend on the backend at all, and lives here:
 - concurrent calls are batched (dynamic batching, ``architecture.md`` 12.4);
 - ``output_context`` is passed from each input to its output;
 - ``await adapter.map(items)`` runs every item concurrently, so they batch;
+- every call runs as a graph node named ``adapter.name``: an error leaving it
+  says where it happened (``in node: shelf > facebook/detr-resnet-50``);
 - ``close()`` stops the thread and releases the model.
 
 A backend implements one method, ``run_batch``: backend inputs in, raw backend
@@ -42,6 +44,7 @@ from dataclasses import dataclass
 from typing import Any, Generic, Literal, overload
 
 from singlepipe._fanout import gather_all, gather_settled
+from singlepipe.graph._context import node_scope
 from singlepipe.tasks import InT, OutT, Task
 
 
@@ -82,19 +85,32 @@ class Adapter(ABC, Generic[InT, OutT]):
     max_wait_ms:
         How long the first input of a batch waits for more, in milliseconds.
         ``0`` (default): no waiting, only inputs already queued join the batch.
+        Under load batches grow without waiting; a server rarely needs more.
+    name:
+        The adapter's name as a graph node, in error notes and the run log.
+        Default: ``ClassName(task)``; ``HFAdapter`` uses the model id. Give one
+        when two adapters of the same model play different roles in a graph.
 
     Calls to one adapter run one batch at a time in its worker thread;
     different adapters run in parallel. Needs an asyncio event loop.
     """
 
     def __init__(
-        self, task: Task[InT, OutT], *, max_batch_size: int = 1, max_wait_ms: float = 0
+        self,
+        task: Task[InT, OutT],
+        *,
+        max_batch_size: int = 1,
+        max_wait_ms: float = 0,
+        name: str | None = None,
     ) -> None:
+        if name is not None and not name:
+            raise ValueError("name must not be empty")
         if max_batch_size < 1:
             raise ValueError(f"max_batch_size must be at least 1, got {max_batch_size}")
         if max_wait_ms < 0:
             raise ValueError(f"max_wait_ms must not be negative, got {max_wait_ms}")
         self.task = task
+        self.name = f"{type(self).__name__}({task.name})" if name is None else name
         self.max_batch_size = max_batch_size
         self.max_wait_ms = max_wait_ms
         self._queue: queue.SimpleQueue[_Job[InT, OutT] | None] = queue.SimpleQueue()
@@ -130,10 +146,13 @@ class Adapter(ABC, Generic[InT, OutT]):
             If ``raw`` is not a valid input; the model is not called.
         RuntimeError
             If the adapter is closed, or ``run_batch`` broke its contract.
+
+        Any error leaves with a note naming the node path (``in node: …``).
         """
-        self._ensure_open()
-        validated = await asyncio.to_thread(self.task.input_schema.from_raw, raw)
-        return await asyncio.wrap_future(self._submit(validated))
+        with node_scope(self.name):
+            self._ensure_open()
+            validated = await asyncio.to_thread(self.task.input_schema.from_raw, raw)
+            return await asyncio.wrap_future(self._submit(validated))
 
     @overload
     async def map(
@@ -166,7 +185,7 @@ class Adapter(ABC, Generic[InT, OutT]):
             If ``errors`` is neither ``"raise"`` nor ``"collect"``.
         """
         self._ensure_open()
-        name = f"{self!r}.map"
+        name = f"{self.name}.map"
         if errors == "raise":
             return await gather_all(self.__call__, items, name=name)
         if errors == "collect":
