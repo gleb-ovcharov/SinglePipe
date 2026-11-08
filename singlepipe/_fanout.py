@@ -16,6 +16,9 @@ Why not a loop or plain ``asyncio.gather``:
   exception is raised, so ``except ValueError`` and FastAPI handlers keep
   working, with a note saying which item failed.
 
+Each item's task is marked with its index (``mark_item``), so a node run for
+the item records which item it was in the run log (``graph._context``).
+
 Notes. An exception gets one note per fan-out, listing every index it failed
 at: an adapter whose whole batch fails sets the *same* exception object on each
 call of the batch, and a note per item would pile them all onto that one object.
@@ -27,6 +30,8 @@ import asyncio
 from collections import defaultdict
 from collections.abc import Callable, Coroutine, Iterable, Sequence
 from typing import Any
+
+from singlepipe._graph._context import mark_item
 
 
 async def gather_all[T, R](
@@ -42,7 +47,7 @@ async def gather_all[T, R](
     failed: BaseException | None = None
     try:
         async with asyncio.TaskGroup() as group:
-            tasks = [group.create_task(call(item)) for item in batch]
+            tasks = [group.create_task(_as_item(call, i, item)) for i, item in enumerate(batch)]
     except ExceptionGroup as errors:
         failed = _first_failure(tasks, len(batch), name) or errors
     if failed is not None:
@@ -62,20 +67,26 @@ async def gather_settled[T, R](
     """
     batch = list(items)
 
-    async def settle(item: T) -> R | Exception:
+    async def settle(index: int, item: T) -> R | Exception:
         try:
-            return await call(item)
+            return await _as_item(call, index, item)
         except Exception as error:
             return error
 
     async with asyncio.TaskGroup() as group:
-        tasks = [group.create_task(settle(item)) for item in batch]
+        tasks = [group.create_task(settle(i, item)) for i, item in enumerate(batch)]
     results = [task.result() for task in tasks]
 
     _note_failures(
         {i: r for i, r in enumerate(results) if isinstance(r, Exception)}, len(batch), name
     )
     return results
+
+
+async def _as_item[T, R](call: Callable[[T], Coroutine[Any, Any, R]], index: int, item: T) -> R:
+    """Run ``call(item)`` in the item's own task, marked as item ``index``."""
+    mark_item(index)
+    return await call(item)
 
 
 # ----------------------------------------------------------------- notes

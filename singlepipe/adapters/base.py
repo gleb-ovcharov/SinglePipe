@@ -10,7 +10,8 @@ of what it does does not depend on the backend at all, and lives here:
 - ``output_context`` is passed from each input to its output;
 - ``await adapter.map(items)`` runs every item concurrently, so they batch;
 - every call runs as a graph node named ``adapter.name``: an error leaving it
-  says where it happened (``in node: shelf > facebook/detr-resnet-50``);
+  says where it happened (``in node: shelf > facebook/detr-resnet-50``), and
+  ``graph.run(...)`` records the raw input and the output;
 - ``close()`` stops the thread and releases the model.
 
 A backend implements one method, ``run_batch``: backend inputs in, raw backend
@@ -44,7 +45,7 @@ from dataclasses import dataclass
 from typing import Any, Generic, Literal, overload
 
 from singlepipe._fanout import gather_all, gather_settled
-from singlepipe.graph._context import node_scope
+from singlepipe._graph._context import node_step
 from singlepipe.tasks import InT, OutT, Task
 
 
@@ -149,10 +150,12 @@ class Adapter(ABC, Generic[InT, OutT]):
 
         Any error leaves with a note naming the node path (``in node: …``).
         """
-        with node_scope(self.name):
+        with node_step(self.name, {"raw": raw}) as outcome:
             self._ensure_open()
             validated = await asyncio.to_thread(self.task.input_schema.from_raw, raw)
-            return await asyncio.wrap_future(self._submit(validated))
+            output: OutT = await asyncio.wrap_future(self._submit(validated))
+            outcome.output = output
+        return output
 
     @overload
     async def map(

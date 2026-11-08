@@ -2,8 +2,9 @@
 
 A node is an ordinary function with three additions:
 
-- it runs inside ``node_scope(name)``, so an error leaving it says where it
-  happened (``in node: shelf > bottles``) and, later, the run log records it;
+- it runs as a step of the graph (``node_step``): an error leaving it says
+  where it happened (``in node: shelf > bottles``), and ``graph.run(...)``
+  records its arguments as passed and its result;
 - its annotated arguments and its annotated return value are validated by
   pydantic in strict mode: inside a graph the data is ours, and a silent
   ``"5"`` → ``5`` would hide a bug (``architecture.md`` 12.1). Our own types are
@@ -48,7 +49,7 @@ from typing import Any, Generic, Literal, ParamSpec, TypeVar, cast, get_type_hin
 
 from pydantic import TypeAdapter, ValidationError
 
-from singlepipe.graph._context import node_scope
+from singlepipe._graph._context import node_step
 
 P = ParamSpec("P")
 R = TypeVar("R")
@@ -81,7 +82,9 @@ class _Boundary:
         result = TypeAdapter(hints["return"]) if "return" in hints else None
         return cls(arguments, result)
 
-    def check_arguments(self, bound: inspect.BoundArguments, name: str) -> None:
+    def check_arguments(
+        self, bound: inspect.BoundArguments, name: str, *, strict: bool = True
+    ) -> None:
         """Validate the passed arguments in place; defaults are trusted, as in pydantic."""
         for arg, value in bound.arguments.items():
             if arg not in self.arguments:
@@ -90,24 +93,26 @@ class _Boundary:
             where = f"argument {arg!r} of {name}"
             if kind is inspect.Parameter.VAR_POSITIONAL:
                 bound.arguments[arg] = tuple(
-                    _validate(adapter, v, f"{where} at index {i}") for i, v in enumerate(value)
+                    _validate(adapter, v, f"{where} at index {i}", strict)
+                    for i, v in enumerate(value)
                 )
             elif kind is inspect.Parameter.VAR_KEYWORD:
                 bound.arguments[arg] = {
-                    k: _validate(adapter, v, f"{where} for key {k!r}") for k, v in value.items()
+                    k: _validate(adapter, v, f"{where} for key {k!r}", strict)
+                    for k, v in value.items()
                 }
             else:
-                bound.arguments[arg] = _validate(adapter, value, where)
+                bound.arguments[arg] = _validate(adapter, value, where, strict)
 
     def check_result(self, value: Any, name: str) -> Any:
         if self.result is None:
             return value
-        return _validate(self.result, value, f"return value of {name}")
+        return _validate(self.result, value, f"return value of {name}", True)
 
 
-def _validate(adapter: TypeAdapter[Any], value: Any, where: str) -> Any:
+def _validate(adapter: TypeAdapter[Any], value: Any, where: str, strict: bool) -> Any:
     try:
-        return adapter.validate_python(value, strict=True)
+        return adapter.validate_python(value, strict=strict)
     except ValidationError as error:
         error.add_note(where)
         raise
@@ -150,19 +155,22 @@ class Node(Generic[P, R]):
     # -- running
 
     def _run_sync(self, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
-        with node_scope(self.name):
-            bound = self._checked(args, kwargs)
-            return self._result(self.fn(*bound.args, **bound.kwargs))
+        bound = self._bind(args, kwargs)
+        with node_step(self.name, dict(bound.arguments)) as outcome:
+            self._get_boundary().check_arguments(bound, self.name)
+            outcome.output = self._result(self.fn(*bound.args, **bound.kwargs))
+        return outcome.output
 
     async def _run_async(self, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
-        with node_scope(self.name):
-            bound = self._checked(args, kwargs)
-            return self._result(await self.fn(*bound.args, **bound.kwargs))
+        bound = self._bind(args, kwargs)
+        with node_step(self.name, dict(bound.arguments)) as outcome:
+            self._get_boundary().check_arguments(bound, self.name)
+            outcome.output = self._result(await self.fn(*bound.args, **bound.kwargs))
+        return outcome.output
 
-    def _checked(self, args: tuple[Any, ...], kwargs: dict[str, Any]) -> inspect.BoundArguments:
-        bound = self._signature.bind(*args, **kwargs)  # wrong arguments: TypeError, as for fn
-        self._get_boundary().check_arguments(bound, self.name)
-        return bound
+    def _bind(self, args: tuple[Any, ...], kwargs: dict[str, Any]) -> inspect.BoundArguments:
+        """Arguments by name, as passed; wrong arguments raise TypeError, as for ``fn``."""
+        return self._signature.bind(*args, **kwargs)
 
     def _result(self, value: Any) -> Any:
         return self._get_boundary().check_result(value, self.name)

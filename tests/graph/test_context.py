@@ -6,7 +6,7 @@ import asyncio
 
 import pytest
 
-from singlepipe.graph._context import current_path, node_scope
+from singlepipe._graph._context import current_path, node_scope
 
 
 @pytest.fixture

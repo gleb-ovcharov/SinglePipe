@@ -13,8 +13,8 @@ import pytest
 from PIL import Image as PILImage
 from pydantic import BaseModel, Field, ValidationError
 
-from singlepipe.graph._context import current_path, node_scope
-from singlepipe.graph.node import Node, node
+from singlepipe._graph._context import current_path, node_scope
+from singlepipe._graph.node import Node, node
 from singlepipe.schemas.modalities import Image
 
 

@@ -9,10 +9,10 @@ import pytest
 from PIL import Image as PILImage
 from pydantic import ValidationError
 
+from singlepipe._graph._context import node_scope
 from singlepipe.adapters import hf_adapter
 from singlepipe.adapters.base import Adapter
 from singlepipe.adapters.hf_adapter import HFAdapter
-from singlepipe.graph._context import node_scope
 from singlepipe.schemas.image.classification import (
     ImageClassificationInput,
     ImageClassificationOutput,
