@@ -26,6 +26,15 @@ class TestImport:
 
         assert result.stdout.strip() == "[]"
 
+    def test_exposes_node_and_ops(self) -> None:
+        """README uses ``sp.node`` and ``sp.ops.crops`` after a bare ``import singlepipe``.
+
+        A fresh interpreter: here other tests have already imported the submodules,
+        which would hide a missing import in ``__init__.py``.
+        """
+        code = "import singlepipe as sp; sp.node; sp.ops.crops"
+        subprocess.run([sys.executable, "-c", code], check=True)
+
     def test_exposes_tasks(self) -> None:
         assert sp.tasks.image_classification is image_classification
         assert sp.Task is type(image_classification)
