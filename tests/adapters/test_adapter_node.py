@@ -99,12 +99,19 @@ class TestPath:
 
     @pytest.mark.anyio
     async def test_map_items_run_inside_the_callers_node(self) -> None:
-        """A failed batch: one exception object, one path note, one map note by name."""
+        """A failed batch: one exception object, one path note, one map note by name.
+
+        ``collect``, not ``raise``: in ``raise`` the first item to wake cancels the
+        rest, so which indices the note lists depends on timing (12.8).
+        """
         adapter = Fixed(name="classifier", fail=True, max_batch_size=2, max_wait_ms=1000)
         try:
-            with pytest.raises(RuntimeError) as info, node_scope("shelf"):
-                await adapter.map([image(), image()])
-            assert notes(info.value) == [
+            with node_scope("shelf"):
+                results = await adapter.map([image(), image()], errors="collect")
+            error = results[0]
+            assert isinstance(error, RuntimeError)
+            assert results[1] is error
+            assert notes(error) == [
                 "in node: shelf > classifier",
                 "classifier.map: items at indices 0, 1 of 2",
             ]

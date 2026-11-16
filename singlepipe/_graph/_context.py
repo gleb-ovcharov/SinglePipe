@@ -14,8 +14,9 @@ Why ``ContextVar``: a context is copied into every task that ``TaskGroup`` or
 follow the work into ``map`` items and thread nodes, while concurrent runs — 50
 FastAPI requests through one graph — never see each other's.
 
-Map items. ``map`` marks each item's task with the item's index
-(``mark_item``); the first node entered in that task takes the index, so its
+Map items. ``map`` marks each item with its index (``mark_item`` in the item's
+own task, ``item_scope`` around it in a synchronous map); the first node entered
+for the item takes the index, so its
 step says which item it ran for (``Step.items``). Indices are kept out of the
 path: one failed batch is one exception object for many items, and with indices
 in the path it would collect a note per item.
@@ -65,6 +66,16 @@ def current_path() -> tuple[str, ...]:
 def mark_item(index: int) -> None:
     """Call at the start of a map item's own task: its first node runs for item ``index``."""
     _pending_item.set(index)
+
+
+@contextmanager
+def item_scope(index: int) -> Generator[None]:
+    """``mark_item`` for a synchronous map: items share one context, so undo it after."""
+    token = _pending_item.set(index)
+    try:
+        yield
+    finally:
+        _pending_item.reset(token)
 
 
 @contextmanager

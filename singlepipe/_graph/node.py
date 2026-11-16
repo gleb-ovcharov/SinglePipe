@@ -29,6 +29,15 @@ thread hop per filter would cost more than the filter. Heavy synchronous work
 (a big regex pass, pure-Python image processing) must ask for ``thread=True``,
 or it freezes every request served by the same event loop while it runs.
 
+``node.map(items, **shared)`` calls the node once per item, the item as the
+first argument and ``shared`` as keyword arguments to every call. It runs the
+way the node runs: a plain node maps synchronously and returns a list; an
+``async def`` or ``thread=True`` node maps concurrently and must be awaited.
+``errors="raise" | "collect"`` works as in ``Adapter.map``. mypy knows the
+result type; it does not check the items or ``shared`` (ParamSpec cannot express
+"the first parameter, then any keyword arguments, then ``errors``"), but the
+node checks its annotated arguments on every call, at run time.
+
 Annotations are resolved on the first call, not at decoration: with
 ``from __future__ import annotations`` an annotation may name a class defined
 further down the module.
@@ -43,16 +52,21 @@ import asyncio
 import functools
 import inspect
 import re
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable, Coroutine, Iterable
 from dataclasses import dataclass
 from typing import Any, Generic, Literal, ParamSpec, TypeVar, cast, get_type_hints, overload
 
 from pydantic import TypeAdapter, ValidationError
 
+from singlepipe._fanout import gather_all, gather_settled, run_all, run_settled
 from singlepipe._graph._context import node_step
 
 P = ParamSpec("P")
 R = TypeVar("R")
+P2 = ParamSpec("P2")
+R2 = TypeVar("R2")
+
+Errors = Literal["raise", "collect"]
 
 
 # ---------------- boundary checks
@@ -151,6 +165,63 @@ class Node(Generic[P, R]):
 
     def __repr__(self) -> str:
         return f"<node {self.name}>"
+
+    # -- map
+
+    # Async first: its R is a coroutine, which the plain overloads would also match.
+    @overload
+    def map(
+        self: Node[P2, Coroutine[Any, Any, R2]],
+        items: Iterable[Any],
+        /,
+        *,
+        errors: Literal["raise"] = "raise",
+        **shared: Any,
+    ) -> Coroutine[Any, Any, list[R2]]: ...
+    @overload
+    def map(
+        self: Node[P2, Coroutine[Any, Any, R2]],
+        items: Iterable[Any],
+        /,
+        *,
+        errors: Literal["collect"],
+        **shared: Any,
+    ) -> Coroutine[Any, Any, list[R2 | Exception]]: ...
+    @overload
+    def map(
+        self: Node[P2, R2],
+        items: Iterable[Any],
+        /,
+        *,
+        errors: Literal["raise"] = "raise",
+        **shared: Any,
+    ) -> list[R2]: ...
+    @overload
+    def map(
+        self: Node[P2, R2], items: Iterable[Any], /, *, errors: Literal["collect"], **shared: Any
+    ) -> list[R2 | Exception]: ...
+    def map(self, items: Iterable[Any], /, *, errors: Errors = "raise", **shared: Any) -> Any:
+        """Call the node on every item: ``node(item, **shared)``; results in input order.
+
+        A plain node returns the list; an async or thread node returns a
+        coroutine that runs every item concurrently. ``errors="raise"``: the
+        first failure is raised as is, with a note naming the item's index.
+        ``errors="collect"``: a failed item's exception takes its place.
+
+        Raises ``ValueError`` at once if ``errors`` is neither of the two.
+        """
+        if errors not in ("raise", "collect"):
+            raise ValueError(f'errors must be "raise" or "collect", got {errors!r}')
+        name = f"{self.name}.map"
+
+        def call(item: Any) -> Any:
+            return self(item, **shared)  # checked at run time, by the node
+
+        if self._is_async or self.thread:
+            fanout = gather_all if errors == "raise" else gather_settled
+            return fanout(call, items, name=name)
+        sync_fanout = run_all if errors == "raise" else run_settled
+        return sync_fanout(call, items, name=name)
 
     # -- running
 

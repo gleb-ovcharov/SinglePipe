@@ -1,8 +1,11 @@
 """Fan-out: run one async call on every item concurrently, results in input order.
 
-This is the engine behind ``Adapter.map`` (and later ``.map`` of ``@sp.node``
-and ``@sp.graph`` objects). It is written against "an async callable" only, so
-every kind of node shares one behaviour.
+This is the engine behind ``.map`` of adapters, ``@sp.node`` and ``@sp.graph``.
+It is written against "a callable" only, so every kind of node shares one
+behaviour. A synchronous node maps synchronously (``run_all``, ``run_settled``):
+items run one after another on the caller's thread, with the same results and
+notes; running synchronous code "concurrently" on an event loop would gain
+nothing.
 
 Why not a loop or plain ``asyncio.gather``:
 
@@ -31,7 +34,7 @@ from collections import defaultdict
 from collections.abc import Callable, Coroutine, Iterable, Sequence
 from typing import Any
 
-from singlepipe._graph._context import mark_item
+from singlepipe._graph._context import item_scope, mark_item
 
 
 async def gather_all[T, R](
@@ -87,6 +90,38 @@ async def _as_item[T, R](call: Callable[[T], Coroutine[Any, Any, R]], index: int
     """Run ``call(item)`` in the item's own task, marked as item ``index``."""
     mark_item(index)
     return await call(item)
+
+
+def run_all[T, R](call: Callable[[T], R], items: Iterable[T], *, name: str) -> list[R]:
+    """Synchronous ``gather_all``: items one by one; the first failure is raised, noted."""
+    batch = list(items)
+    results: list[R] = []
+    for index, item in enumerate(batch):
+        try:
+            with item_scope(index):
+                results.append(call(item))
+        except Exception as error:
+            _note_failures({index: error}, len(batch), name)
+            raise
+    return results
+
+
+def run_settled[T, R](
+    call: Callable[[T], R], items: Iterable[T], *, name: str
+) -> list[R | Exception]:
+    """Synchronous ``gather_settled``: every item runs; a failure takes its place."""
+    batch = list(items)
+    results: list[R | Exception] = []
+    for index, item in enumerate(batch):
+        try:
+            with item_scope(index):
+                results.append(call(item))
+        except Exception as error:
+            results.append(error)
+    _note_failures(
+        {i: r for i, r in enumerate(results) if isinstance(r, Exception)}, len(batch), name
+    )
+    return results
 
 
 # ----------------------------------------------------------------- notes

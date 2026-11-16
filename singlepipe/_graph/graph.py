@@ -17,7 +17,9 @@ plain ``async def`` lacks:
   with references to its inputs and output. ``await shelf(image)`` records
   nothing and costs nothing extra;
 - if a run fails, the exception propagates unchanged, and the steps recorded
-  up to the failure are available from it: ``steps_of(error)``.
+  up to the failure are available from it: ``steps_of(error)``;
+- ``await shelf.map(images, **shared)`` runs the graph on every item
+  concurrently, like ``Adapter.map`` (``errors="raise" | "collect"``).
 
 FastAPI: the decorator keeps the function's signature, name and globals
 (``functools.update_wrapper``), and FastAPI recognises the graph as async, so a
@@ -28,10 +30,11 @@ from __future__ import annotations
 
 import functools
 import inspect
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable, Coroutine, Iterable
 from dataclasses import dataclass
-from typing import Any, Generic, ParamSpec, TypeVar
+from typing import Any, Generic, Literal, ParamSpec, TypeVar, overload
 
+from singlepipe._fanout import gather_all, gather_settled
 from singlepipe._graph._context import Step, current_path, node_step, recording
 from singlepipe._graph.node import _Boundary, _display_name
 
@@ -95,6 +98,39 @@ class Graph(Generic[P, R]):
                 setattr(error, _RUN_STEPS, tuple(log.steps))
                 raise
         return Run(result, tuple(log.steps))
+
+    @overload
+    async def map(
+        self, items: Iterable[Any], /, *, errors: Literal["raise"] = "raise", **shared: Any
+    ) -> list[R]: ...
+    @overload
+    async def map(
+        self, items: Iterable[Any], /, *, errors: Literal["collect"], **shared: Any
+    ) -> list[R | Exception]: ...
+    async def map(
+        self,
+        items: Iterable[Any],
+        /,
+        *,
+        errors: Literal["raise", "collect"] = "raise",
+        **shared: Any,
+    ) -> list[R] | list[R | Exception]:
+        """Run the graph on every item concurrently: ``graph(item, **shared)``.
+
+        As ``Node.map`` for an async node: results in input order;
+        ``errors="raise"`` raises the first failure, noted with its index;
+        ``errors="collect"`` puts a failed item's exception in its place.
+        """
+        if errors not in ("raise", "collect"):
+            raise ValueError(f'errors must be "raise" or "collect", got {errors!r}')
+
+        async def call(item: Any) -> R:
+            return await self(item, **shared)  # checked at run time, by the graph
+
+        name = f"{self.name}.map"
+        if errors == "raise":
+            return await gather_all(call, items, name=name)
+        return await gather_settled(call, items, name=name)
 
     def __repr__(self) -> str:
         return f"<graph {self.name}>"
