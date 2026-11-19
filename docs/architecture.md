@@ -580,7 +580,7 @@ HFAdapter(model, task, *, hf_task=None, device=None,
 
 ```python
 app = sp.serve(HFAdapter("facebook/detr-resnet-50", sp.tasks.object_detection))  # на gpu-1
-detector = sp.RemoteAdapter("http://gpu-1:8000", sp.tasks.object_detection)       # в графе
+detector = sp.RemoteAdapter("http://gpu-1:8000", sp.tasks.object_detection)  # в графе
 ```
 
 - `RemoteAdapter(url, task, ...)` — обычный адаптер, как `HFAdapter`: та же база `Adapter`, те же `Task[In, Out]` и типы для mypy, только `run_batch` — HTTP-запрос. Перенести узел на другую машину — поменять одну строку при создании адаптера.
