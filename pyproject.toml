@@ -29,6 +29,12 @@ dependencies = [
     "numpy>=2.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/YTIputi/SinglePipe"
+Repository = "https://github.com/YTIputi/SinglePipe"
+Issues = "https://github.com/YTIputi/SinglePipe/issues"
+Changelog = "https://github.com/YTIputi/SinglePipe/blob/master/CHANGELOG.md"
+
 [project.optional-dependencies]
 # HFAdapter. torch is included: without it transformers cannot load models.
 # For a specific CUDA build, install torch from its own index on top.
